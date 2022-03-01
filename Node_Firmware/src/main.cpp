@@ -52,6 +52,13 @@ PubSubClient client(espClient);
 Preferences preferences;
 
 
+//Declare semaphore
+SemaphoreHandle_t   touch_1_smp = NULL;
+SemaphoreHandle_t   touch_2_smp = NULL;
+SemaphoreHandle_t   touch_3_smp = NULL;
+SemaphoreHandle_t   touch_4_smp = NULL;
+
+
                                 //Callback Function
 /**
  * @brief MQTT callback 
@@ -66,16 +73,16 @@ void mqtt_callback(char* topic, byte* message, unsigned int length){
 
 
 void IRAM_ATTR touch_pin_1_isr() {
-    //do something
+    xSemaphoreGiveFromISR(touch_1_smp , NULL);
 }
 void IRAM_ATTR touch_pin_2_isr() {
-    //do something
+    xSemaphoreGiveFromISR(touch_2_smp , NULL);
 }
 void IRAM_ATTR touch_pin_3_isr() {
-    //do something
+    xSemaphoreGiveFromISR(touch_3_smp , NULL);
 }
 void IRAM_ATTR touch_pin_4_isr() {
-    //do something
+    xSemaphoreGiveFromISR(touch_4_smp , NULL);
 }
 void IRAM_ATTR d_input_pin_1_isr() {
     //do something
@@ -111,6 +118,74 @@ void gpio_task(void *pvPara) {
     attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_3), touch_pin_3_isr, RISING);
     attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_4), touch_pin_4_isr, RISING);
 }
+
+
+/**
+ * @brief This task will be used for indicating the times the button was touched
+ * 
+ * @param pvPara 
+ */
+void touch_pin_1_task(void *pvPara){
+    uint8_t time;
+    while (1)
+    {
+        time = 0;
+        if( xSemaphoreTake( touch_1_smp , portMAX_DELAY) == pdTRUE ) {
+            time++;
+            while ( xSemaphoreTake ( touch_1_smp , 500 / portTICK_PERIOD_MS) == pdTRUE) {
+                time++;
+                if(time == 3) break;
+            }
+            if( (time == 1) && digitalRead(TOUCH_PIN_1) ) {
+                //long touch function
+            } else {
+                switch (time)
+                {
+                case 1:
+                    // 1 time function;
+                    break;
+                case 2:
+                    // 2 times function
+                    break;
+                case 3:
+                    // 3 times function
+                    break;               
+                }
+            }
+        }
+    }
+}
+
+
+/**
+ * @brief This task will be used for indicating the times the button was touched
+ * 
+ * @param pvPara 
+ */
+void touch_pin_2_task(void *pvPara){
+    xSemaphoreTake(touch_2_smp , portMAX_DELAY);
+}
+
+
+/**
+ * @brief This task will be used for indicating the times the button was touched
+ * 
+ * @param pvPara 
+ */
+void touch_pin_3_task(void *pvPara){
+    xSemaphoreTake(touch_3_smp , portMAX_DELAY);
+}
+
+
+/**
+ * @brief This task will be used for indicating the times the button was touched
+ * 
+ * @param pvPara 
+ */
+void touch_pin_4_task(void *pvPara){
+    xSemaphoreTake(touch_4_smp , portMAX_DELAY);
+}
+
 
 /**
  * @brief This task will setup onboard LED and blink it until the essential setup is complete
@@ -230,9 +305,15 @@ void setup() {
     mqtt.password = "password";
     mqtt.device_name = "esp32";
 
+    touch_1_smp = xSemaphoreCreateBinary();
+    touch_2_smp = xSemaphoreCreateBinary();
+    touch_3_smp = xSemaphoreCreateBinary();
+    touch_4_smp = xSemaphoreCreateBinary();
+
     xTaskCreate(blink_led_task, "Blink LED Task", 1024, NULL, 10, &blink_led_handle);
 
     xTaskCreate(wifi_task, "WiFi_task", 3072, &wifi, 10, &wifi_task_handle);
+
     vTaskDelete(NULL);
 }
 
