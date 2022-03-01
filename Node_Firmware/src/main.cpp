@@ -156,9 +156,7 @@ void wifi_task(void *pvPara){
     vTaskDelay( 3000 / portTICK_PERIOD_MS);
     vTaskSuspend(blink_led_handle);
     digitalWrite(LED_BUILTIN, LOW);
-    while (1)
-    {
-    }      
+    vTaskDelete(wifi_task_handle);    
 }
 
 
@@ -235,7 +233,7 @@ void setup() {
     xTaskCreate(blink_led_task, "Blink LED Task", 1024, NULL, 10, &blink_led_handle);
 
     xTaskCreate(wifi_task, "WiFi_task", 3072, &wifi, 10, &wifi_task_handle);
-    // vTaskDelete(NULL);
+    vTaskDelete(NULL);
 }
 
 
