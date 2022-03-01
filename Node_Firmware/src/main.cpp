@@ -4,6 +4,7 @@
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include <DHT.h>
+#include <string.h>
 
 
 //Define macro
@@ -86,16 +87,16 @@ void IRAM_ATTR touch_pin_4_isr() {
     xSemaphoreGiveFromISR(touch_4_smp , NULL);
 }
 void IRAM_ATTR d_input_pin_1_isr() {
-    //do something
+    client.publish( strcat( (char*)mqtt.user_name, "d_input1"), "strigg");
 }
 void IRAM_ATTR d_input_pin_2_isr() {
-    //do something
+    client.publish( strcat( (char*)mqtt.user_name, "d_input2"), "strigg");
 }
 void IRAM_ATTR d_input_pin_3_isr() {
-    //do something
+    client.publish( strcat( (char*)mqtt.user_name, "d_input3"), "strigg");
 }
 void IRAM_ATTR d_input_pin_4_isr() {
-    //do something
+    client.publish( strcat( (char*)mqtt.user_name, "d_input4"), "strigg");
 }
 
 
@@ -298,13 +299,9 @@ void dht11_task(void *pvPara) {
         if (isnan(h) || isnan(t)) {
             Serial.println(F("Failed to read from DHT sensor!"));
         }
-        char *string_humi;
-        snprintf(string_humi, 3, "%f", h);
-        client.publish( strcat( (char*)mqtt.device_name, "dht11_humi"), string_humi);
-        char *string_temp;
-        snprintf(string_temp, 3, "%f", t);
-        client.publish( strcat( (char*)mqtt.device_name, "dht11_temp"), string_temp);
-    } 
+        client.publish( strcat( (char*)mqtt.device_name, "dht11_humi"), String(h).c_str());
+        client.publish( strcat( (char*)mqtt.device_name, "dht11_temp"), String(t).c_str());
+    }
 }
 
 
