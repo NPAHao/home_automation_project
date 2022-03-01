@@ -125,7 +125,7 @@ void gpio_task(void *pvPara) {
  * 
  * @param pvPara 
  */
-void touch_pin_1_task(void *pvPara){
+void touch_pin_1_task(void *pvPara) {
     uint8_t time;
     while (1)
     {
@@ -137,18 +137,18 @@ void touch_pin_1_task(void *pvPara){
                 if(time == 3) break;
             }
             if( (time == 1) && digitalRead(TOUCH_PIN_1) ) {
-                //long touch function
+                client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "longtouch");
             } else {
                 switch (time)
                 {
                 case 1:
-                    // 1 time function;
+                    client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "singletouch");
                     break;
                 case 2:
-                    // 2 times function
+                    client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "doubletouch");
                     break;
                 case 3:
-                    // 3 times function
+                    client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "trippletouch");
                     break;               
                 }
             }
@@ -162,8 +162,71 @@ void touch_pin_1_task(void *pvPara){
  * 
  * @param pvPara 
  */
-void touch_pin_2_task(void *pvPara){
-    xSemaphoreTake(touch_2_smp , portMAX_DELAY);
+void touch_pin_2_task(void *pvPara) {
+    uint8_t time;
+    while (1)
+    {
+        time = 0;
+        if( xSemaphoreTake( touch_2_smp , portMAX_DELAY) == pdTRUE ) {
+            time++;
+            while ( xSemaphoreTake ( touch_2_smp , 500 / portTICK_PERIOD_MS) == pdTRUE) {
+                time++;
+                if(time == 3) break;
+            }
+            if( (time == 1) && digitalRead(TOUCH_PIN_2) ) {
+                client.publish( strcat( (char*)mqtt.device_name, "/touch2"), "longtouch");
+            } else {
+                switch (time)
+                {
+                case 1:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch2"), "singletouch");
+                    break;
+                case 2:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch2"), "doubletouch");
+                    break;
+                case 3:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch2"), "trippletouch");
+                    break;               
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief This task will be used for indicating the times the button was touched
+ * 
+ * @param pvPara 
+ */
+void touch_pin_3_task(void *pvPara) {
+    uint8_t time;
+    while (1)
+    {
+        time = 0;
+        if( xSemaphoreTake( touch_3_smp , portMAX_DELAY) == pdTRUE ) {
+            time++;
+            while ( xSemaphoreTake ( touch_3_smp , 500 / portTICK_PERIOD_MS) == pdTRUE) {
+                time++;
+                if(time == 3) break;
+            }
+            if( (time == 1) && digitalRead(TOUCH_PIN_3) ) {
+                client.publish( strcat( (char*)mqtt.device_name, "/touch3"), "longtouch");
+            } else {
+                switch (time)
+                {
+                case 1:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch3"), "singletouch");
+                    break;
+                case 2:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch3"), "doubletouch");
+                    break;
+                case 3:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch3"), "trippletouch");
+                    break;               
+                }
+            }
+        }
+    }
 }
 
 
@@ -172,18 +235,35 @@ void touch_pin_2_task(void *pvPara){
  * 
  * @param pvPara 
  */
-void touch_pin_3_task(void *pvPara){
-    xSemaphoreTake(touch_3_smp , portMAX_DELAY);
-}
-
-
-/**
- * @brief This task will be used for indicating the times the button was touched
- * 
- * @param pvPara 
- */
-void touch_pin_4_task(void *pvPara){
-    xSemaphoreTake(touch_4_smp , portMAX_DELAY);
+void touch_pin_4_task(void *pvPara) {
+    uint8_t time;
+    while (1)
+    {
+        time = 0;
+        if( xSemaphoreTake( touch_4_smp , portMAX_DELAY) == pdTRUE ) {
+            time++;
+            while ( xSemaphoreTake ( touch_4_smp , 500 / portTICK_PERIOD_MS) == pdTRUE) {
+                time++;
+                if(time == 3) break;
+            }
+            if( (time == 1) && digitalRead(TOUCH_PIN_4) ) {
+                client.publish( strcat( (char*)mqtt.device_name, "/touch4"), "longtouch");
+            } else {
+                switch (time)
+                {
+                case 1:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch4"), "singletouch");
+                    break;
+                case 2:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch4"), "doubletouch");
+                    break;
+                case 3:
+                    client.publish( strcat( (char*)mqtt.device_name, "/touch4"), "trippletouch");
+                    break;               
+                }
+            }
+        }
+    }
 }
 
 
@@ -213,10 +293,9 @@ void dht11_task(void *pvPara) {
  * @param pvPara 
  */
 void wifi_task(void *pvPara){
-    wifi_infor sudo_wifi = *(wifi_infor*)pvPara;
     Serial.print("Connect to : ");
-    Serial.println(sudo_wifi.ssid);
-    WiFi.begin(sudo_wifi.ssid, sudo_wifi.password);
+    Serial.println(wifi.ssid);
+    WiFi.begin(wifi.ssid, wifi.password);
     while (WiFi.status() != WL_CONNECTED)
     {
         vTaskDelay( 500 / portTICK_PERIOD_MS );
@@ -254,8 +333,7 @@ void process_mqtt_msg(void *pvPara){
  * @param pvPara 
  */
 void mqtt_task(void *pvPara) {
-    mqtt_infor sudo_mqtt = *(mqtt_infor*)pvPara;
-    client.setServer(sudo_mqtt.server, 1883);
+    client.setServer(mqtt.server, 1883);
     client.setCallback(mqtt_callback);
     while(1) {
         while (!client.connected()) {
@@ -264,10 +342,10 @@ void mqtt_task(void *pvPara) {
         if (client.connect("WiFiClient")) {
         Serial.println("connected");
         // Subscribe
-        client.subscribe( strcat( (char*)sudo_mqtt.user_name, "/output1stt" ) );
-        client.subscribe( strcat( (char*)sudo_mqtt.user_name, "/output2stt" ) );
-        client.subscribe( strcat( (char*)sudo_mqtt.user_name, "/output3stt" ) );
-        client.subscribe( strcat( (char*)sudo_mqtt.user_name, "/output4stt" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output1stt" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output2stt" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output3stt" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output4stt" ) );
         } else {
             Serial.print("failed, rc=");
             Serial.print(client.state());
@@ -296,7 +374,7 @@ void save_credentials(void *pvPara) {
  */
 void setup() {
     Serial.begin(115200);
-    
+
     wifi.ssid = "NPAH";
     wifi.password = "hao12345";
 
@@ -312,7 +390,7 @@ void setup() {
 
     xTaskCreate(blink_led_task, "Blink LED Task", 1024, NULL, 10, &blink_led_handle);
 
-    xTaskCreate(wifi_task, "WiFi_task", 3072, &wifi, 10, &wifi_task_handle);
+    xTaskCreate(wifi_task, "WiFi_task", 3072, NULL, 10, &wifi_task_handle);
 
     vTaskDelete(NULL);
 }
