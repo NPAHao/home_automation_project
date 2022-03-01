@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
+#include <DHT.h>
 
 
 //Define macro
@@ -283,7 +284,27 @@ void blink_led_task(void *pvPara) {
 
 
 void dht11_task(void *pvPara) {
-    
+    DHT dht(DHT11_PIN, DHT11);
+    dht.begin();
+    TickType_t xLastWakeTime;
+    xLastWakeTime = xTaskGetTickCount ();
+    while (1)
+    {   
+        vTaskDelayUntil( &xLastWakeTime, 10000 / portTICK_PERIOD_MS);
+        // Reading temperature or humidity takes about 250 milliseconds!
+        float h = dht.readHumidity();
+        // Read temperature as Celsius (the default)
+        float t = dht.readTemperature();
+        if (isnan(h) || isnan(t)) {
+            Serial.println(F("Failed to read from DHT sensor!"));
+        }
+        char *string_humi;
+        snprintf(string_humi, 3, "%f", h);
+        client.publish( strcat( (char*)mqtt.device_name, "dht11_humi"), string_humi);
+        char *string_temp;
+        snprintf(string_temp, 3, "%f", t);
+        client.publish( strcat( (char*)mqtt.device_name, "dht11_temp"), string_temp);
+    } 
 }
 
 
@@ -342,10 +363,10 @@ void mqtt_task(void *pvPara) {
         if (client.connect("WiFiClient")) {
         Serial.println("connected");
         // Subscribe
-        client.subscribe( strcat( (char*)mqtt.device_name, "/output1stt" ) );
-        client.subscribe( strcat( (char*)mqtt.device_name, "/output2stt" ) );
-        client.subscribe( strcat( (char*)mqtt.device_name, "/output3stt" ) );
-        client.subscribe( strcat( (char*)mqtt.device_name, "/output4stt" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output1" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output2" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output3" ) );
+        client.subscribe( strcat( (char*)mqtt.device_name, "/output4" ) );
         } else {
             Serial.print("failed, rc=");
             Serial.print(client.state());
