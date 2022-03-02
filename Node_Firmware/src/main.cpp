@@ -77,6 +77,7 @@ void mqtt_callback(char* topic, byte* message, unsigned int length){
 void IRAM_ATTR touch_pin_1_isr() {
     xSemaphoreGiveFromISR(touch_1_smp , NULL);
 }
+
 void IRAM_ATTR touch_pin_2_isr() {
     xSemaphoreGiveFromISR(touch_2_smp , NULL);
 }
@@ -119,6 +120,10 @@ void gpio_task(void *pvPara) {
     attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_2), touch_pin_2_isr, RISING);
     attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_3), touch_pin_3_isr, RISING);
     attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_4), touch_pin_4_isr, RISING);
+    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_1), d_input_pin_1_isr, RISING);
+    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_2), d_input_pin_2_isr, RISING);
+    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_3), d_input_pin_3_isr, RISING);
+    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_4), d_input_pin_4_isr, RISING);    
 }
 
 
@@ -283,7 +288,11 @@ void blink_led_task(void *pvPara) {
     }
 }
 
-
+/**
+ * @brief This task will setup DHT11 and send data periodly 10s
+ * 
+ * @param pvPara 
+ */
 void dht11_task(void *pvPara) {
     DHT dht(DHT11_PIN, DHT11);
     dht.begin();
@@ -296,9 +305,11 @@ void dht11_task(void *pvPara) {
         float h = dht.readHumidity();
         // Read temperature as Celsius (the default)
         float t = dht.readTemperature();
+        // check
         if (isnan(h) || isnan(t)) {
             Serial.println(F("Failed to read from DHT sensor!"));
         }
+        //publish
         client.publish( strcat( (char*)mqtt.device_name, "dht11_humi"), String(h).c_str());
         client.publish( strcat( (char*)mqtt.device_name, "dht11_temp"), String(t).c_str());
     }
@@ -328,7 +339,13 @@ void wifi_task(void *pvPara){
     vTaskDelay( 3000 / portTICK_PERIOD_MS);
     vTaskSuspend(blink_led_handle);
     digitalWrite(LED_BUILTIN, LOW);
-    vTaskDelete(wifi_task_handle);    
+    while (1)
+    {
+        if(WiFi.status() != WL_CONNECTED) {
+        vTaskDelay( 500 / portTICK_PERIOD_MS );
+        Serial.print(".");
+        }
+    }
 }
 
 
