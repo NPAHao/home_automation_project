@@ -3,8 +3,11 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 
-SemaphoreHandle_t key;
+// Replace with your network credentials
+const char* ssid     = "ESP32-Access-Point";
+const char* password = "123456789";
 
+// Set web server port number to 80
 AsyncWebServer server(80);
 
 const char* PARAM_INPUT_1 = "input1";
@@ -35,7 +38,18 @@ void notFound(AsyncWebServerRequest *request) {
   request->send(404, "text/plain", "Not found");
 }
 
-void html_task(void *pvPara) {
+void setup() {
+  Serial.begin(115200);
+
+  // Connect to Wi-Fi network with SSID and password
+  Serial.print("Setting AP (Access Point)…");
+  // Remove the password parameter, if you want the AP (Access Point) to be open
+  WiFi.softAP(ssid, password);
+
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(IP);
+
   // Send web page with input fields to client
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", index_html);
@@ -71,44 +85,8 @@ void html_task(void *pvPara) {
   });
   server.onNotFound(notFound);
   server.begin();
-  vTaskDelete(NULL);
 }
 
-TaskHandle_t wf_and_sc_task_handle;
-
-void wifi_smartconfig_task(void *pvPara) {
-  WiFi.mode(WIFI_AP_STA);
-  /* start SmartConfig */
-  WiFi.beginSmartConfig();
- 
-  /* Wait for SmartConfig packet from mobile */
-  Serial.println("Waiting for SmartConfig.");
-  while (!WiFi.smartConfigDone()) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("SmartConfig done.");
- 
-  /* Wait for WiFi to connect to AP */
-  Serial.println("Waiting for WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("WiFi Connected.");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
-  xSemaphoreGive(key);
-  vTaskDelete(NULL);
-}
-
-void setup() {
-  Serial.begin(115200);
-  key = xSemaphoreCreateBinary();
-  xTaskCreate(wifi_smartconfig_task, "WF and SC task", 4096, NULL, 10, &wf_and_sc_task_handle);
-  xSemaphoreTake(key, portMAX_DELAY);
-}
 void loop() {
-
+  
 }
