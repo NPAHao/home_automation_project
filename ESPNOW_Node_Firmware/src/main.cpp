@@ -24,7 +24,6 @@ bool send_alert_result;
 bool confirm_alert_result;
 
 void blink_led(int times) {
-  pinMode(LED_BUILTIN, OUTPUT);
   for(int i = 0; i<times; i++) {
     digitalWrite(LED_BUILTIN, LOW); //sáng
     delay(200);
@@ -135,17 +134,20 @@ void send_esp_now() {
 }
 
 void setup() {
-  //check up for clear eeprom mode
-  pinMode(CLEAR_EEPROM_PIN, INPUT_PULLUP);
-  if(digitalRead(CLEAR_EEPROM_PIN) == 0) {
-    reset_eeprom();
-    ESP.deepSleep(0);
-  }
-  //set up for sensor
+  //set up pin
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
   pinMode(SENSOR_SWICH, OUTPUT);
   digitalWrite(SENSOR_SWICH, HIGH);         //power for sensor
   delay(SENSOR_READY_DELAY);
   pinMode(SENSOR_PIN, INPUT);
+  pinMode(CLEAR_EEPROM_PIN, INPUT_PULLUP);
+  //check up for clear eeprom mode
+  if(digitalRead(CLEAR_EEPROM_PIN) == 0) {
+    reset_eeprom();
+    ESP.deepSleep(0);
+  }
+  //check up sensor is active
   if(digitalRead(SENSOR_PIN) != 0) {
     setup_esp_now();
     if(check_parameter() != true) {
