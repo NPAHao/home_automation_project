@@ -19,6 +19,31 @@
 bool send_result;
 bool peer_list_done = false;
 
+void send_cb(u8 *mac_addr, u8 status);
+
+void recv_cb(u8 *mac_addr, u8 *data, u8 len);
+
+void add_peer_list();
+
+void setup_espnow();
+
+void reply_to_ping_request(uint8_t *mac_addr);
+
+void handle_rx_msg_from_uart();
+
+void forward_espnow_msg_to_uart(u8 *mac_addr, u8 *data, u8 len);
+
+void setup() {
+  Serial.begin(115200);
+  setup_espnow();
+}
+
+void loop() {
+  if(Serial.available() >0 ) {
+    handle_rx_msg_from_uart();
+  }
+}
+
 void send_cb(u8 *mac_addr, u8 status) {
 
 }
@@ -74,17 +99,16 @@ void handle_rx_msg_from_uart() {
   Serial.readBytes(msg, msg_len);
 //UART msg :   [code][6 x MAC][data.....][data_len]
   uint8_t code = msg[0];
+  uint8_t mac_addr[6];  
   switch (code)
   {
   case ADD_PEER:
-    uint8_t mac_addr[6];
     memcpy(mac_addr, &msg[1], 6);
     if(esp_now_is_peer_exist(mac_addr) == 0) {
       esp_now_add_peer(mac_addr, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
     }
     break;
   case DEL_PEER:
-    uint8_t mac_addr[6];
     memcpy(mac_addr, &msg[1], 6);
     if(esp_now_is_peer_exist(mac_addr) == 1) {
       esp_now_del_peer(mac_addr);
@@ -94,7 +118,6 @@ void handle_rx_msg_from_uart() {
     peer_list_done = true;
     break;
   case SEND_ESPNOW:
-    uint8_t mac_addr[6];
     memcpy(mac_addr, &msg[1], 6);
 
     uint8_t data_len = msg[msg_len - 1];
@@ -115,15 +138,4 @@ void forward_espnow_msg_to_uart(u8 *mac_addr, u8 *data, u8 len) {
   memcpy(&fw_msg[8] , data, len);
   fw_msg[8 + len] = len;
   Serial.write(fw_msg, 1+1+6+len+1);
-}
-
-void setup() {
-  Serial.begin(115200);
-  setup_espnow();
-}
-
-void loop() {
-  if(Serial.available() >0 ) {
-    handle_rx_msg_from_uart();
-  }
 }
