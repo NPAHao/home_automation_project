@@ -47,6 +47,12 @@ struct mqtt_infor {
     const char *device_name;
 } mqtt;
 
+struct espnow {
+    uint8_t mac_addr[6];
+    uint8_t *data = nullptr;
+    uint8_t len;
+};
+
 
 //Declare task handle variable
 TaskHandle_t gpio_task_handle;
@@ -81,6 +87,16 @@ void mqtt_callback(char* topic, byte* message, unsigned int length){
             digitalWrite(D_OUTPUT_PIN_1, digitalRead(D_OUTPUT_PIN_1)?0:1);
             client.publish(strcat( (char*)mqtt.device_name, "/output1stt"), digitalRead(D_OUTPUT_PIN_1)?"ON":"OFF");
         }
+    } else if( strcmp(topic, strcat( (char*)mqtt.device_name, "/peerlistsend")) == 0 ) {
+        for(int i = 0; i < length; i+= 6) {
+            uint8_t msg[8];
+            msg[0] = 7;
+            msg[1] = ADD_PEER;
+            memcpy(&msg[2], message + i, 6);
+            Serial.write(msg, 8);
+        }
+    } else if( strcmp(topic, strcat( (char*)mqtt.device_name, "/alertconfirm")) == 0 ) {
+        //send confirm uart msg
     }
 }
 
@@ -356,16 +372,28 @@ void handle_rx_msg_from_uart(void *pvPara) {
             //UART msg now in buffer :         [code][6 x MAC][data.....][data_len]
             uint8_t msg[payload_len];
             Serial.readBytes(msg, payload_len);
-            uint8_t code = msg[0];
-            uint8_t mac_addr[6];  
+            uint8_t code = msg[0];  
             switch (code)
             {
             case GET_PEER:
-
+                client.publish( strcat( (char*)mqtt.device_name, "/peerlist" ), "GET" );
                 break;
             case FW_MSG:
-                memcpy(mac_addr, &msg[1], 6);
-                break;
+                espnow now_msg;
+                memcpy(now_msg.mac_addr, &msg[1], 6);
+                now_msg.len = msg[payload_len - 1];
+                memcpy(now_msg.data, &msg[7], now_msg.len);
+                uint8_t code = now_msg.data[0];
+                // switch (code)
+                // {
+                // case /* constant-expression */:
+                //     /* code */
+                //     break;
+                
+                // default:
+                //     break;
+                // }
+                // break;
             }
         }
     }
