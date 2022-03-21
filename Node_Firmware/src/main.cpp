@@ -36,23 +36,29 @@
 
 //Declare global varialble
 struct wifi_infor {
-    const char *ssid;
-    const char *password;
+    String ssid;
+    String password;
 } wifi;
 
 struct mqtt_infor {
-    const char *server;
-    const char *user_name;
-    const char *password;
-    const char *device_name;
+    String server;
+    String user_name;
+    String password;
+    String device_name;
 } mqtt;
 
 struct espnow {
-    uint8_t mac_addr[6];
-    uint8_t *data = nullptr;
+    String mac_addr;
+    String data;
     uint8_t len;
 };
 
+struct uart_msg {
+    uint8_t code;
+    espnow now_msg;
+};
+
+String *topic_list = nullptr;
 
 //Declare task handle variable
 TaskHandle_t gpio_task_handle;
@@ -72,6 +78,12 @@ SemaphoreHandle_t   touch_1_smp = NULL;
 // SemaphoreHandle_t   touch_3_smp = NULL;
 // SemaphoreHandle_t   touch_4_smp = NULL;
 
+void parse_uart_msg(uart_msg *msg, String parse_str) {
+    msg->code = parse_str[0];
+    msg->now_msg.mac_addr = parse_str.substring(1, 6);
+    msg->now_msg.len = parse_str[parse_str.length() - 1];
+    msg->now_msg.data = parse_str.substring(7, msg->now_msg.len);
+}
 
                                 //Callback Function
 /**
@@ -82,12 +94,19 @@ SemaphoreHandle_t   touch_1_smp = NULL;
  * @param length Length of message, in byte
  */
 void mqtt_callback(char* topic, byte* message, unsigned int length){
-    if(strcmp(topic, strcat( (char*)mqtt.device_name, "/output1")) == 0) {
-        if(strcmp((const char*)message, "strigg") == 0) {
-            digitalWrite(D_OUTPUT_PIN_1, digitalRead(D_OUTPUT_PIN_1)?0:1);
-            client.publish(strcat( (char*)mqtt.device_name, "/output1stt"), digitalRead(D_OUTPUT_PIN_1)?"ON":"OFF");
+    Serial.println("debug1");
+    if( String(topic) == (mqtt.device_name + "/output1") ) {
+        Serial.println("debug2");
+        String msg;
+        for(int i = 0; i < length; i++) {
+            msg += (char)message[i];
         }
-    } else if( strcmp(topic, strcat( (char*)mqtt.device_name, "/peerlistsend")) == 0 ) {
+        if( msg == "strigg") {
+            Serial.println("debug5");
+            digitalWrite(D_OUTPUT_PIN_1, digitalRead(D_OUTPUT_PIN_1)?0:1);
+            client.publish( (mqtt.device_name + "/output1stt").c_str(), digitalRead(D_OUTPUT_PIN_1)?"ON":"OFF");
+        }
+    } else if( String(topic) == (mqtt.device_name + "/peerlistsend") ) {
         for(int i = 0; i < length; i+= 6) {
             uint8_t msg[8];
             msg[0] = 7;
@@ -95,9 +114,10 @@ void mqtt_callback(char* topic, byte* message, unsigned int length){
             memcpy(&msg[2], message + i, 6);
             Serial.write(msg, 8);
         }
-    } else if( strcmp(topic, strcat( (char*)mqtt.device_name, "/alertconfirm")) == 0 ) {
+    } else if( String(topic) == (mqtt.device_name + "/alertconfirm") ) {
         //send confirm uart msg
     }
+    else Serial.println("debug3");
 }
 
 
@@ -115,7 +135,7 @@ void IRAM_ATTR touch_pin_1_isr() {
 //     xSemaphoreGiveFromISR(touch_4_smp , NULL);
 // }
 void IRAM_ATTR d_input_pin_1_isr() {
-    client.publish(strcat( (char*)mqtt.user_name, "d_input1"), "strigg");
+    client.publish( (mqtt.user_name+ "d_input1").c_str(), "strigg");
 }
 // void IRAM_ATTR d_input_pin_2_isr() {
 //     client.publish( strcat( (char*)mqtt.user_name, "d_input2"), "strigg");
@@ -171,18 +191,18 @@ void touch_pin_1_task(void *pvPara) {
                 if(time == 3) break;
             }
             if( (time == 1) && digitalRead(TOUCH_PIN_1) ) {
-                client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "longtouch");
+                client.publish( (mqtt.user_name + "/touch1").c_str(), "longtouch");
             } else {
                 switch (time)
                 {
                 case 1:
-                    client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "singletouch");
+                    client.publish( (mqtt.user_name + "/touch1").c_str(), "singletouch");
                     break;
                 case 2:
-                    client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "doubletouch");
+                    client.publish( (mqtt.user_name + "/touch1").c_str(), "doubletouch");
                     break;
                 case 3:
-                    client.publish( strcat( (char*)mqtt.user_name, "/touch1"), "trippletouch");
+                    client.publish( (mqtt.user_name + "/touch1").c_str(), "trippletouch");
                     break;               
                 }
             }
@@ -323,8 +343,8 @@ void dht11_task(void *pvPara) {
             Serial.println(F("Failed to read from DHT sensor!"));
         }
         //publish
-        client.publish( strcat( (char*)mqtt.device_name, "dht11_humi"), String(h).c_str());
-        client.publish( strcat( (char*)mqtt.device_name, "dht11_temp"), String(t).c_str());
+        client.publish( (mqtt.device_name + "/dht11_humi").c_str(), String(h).c_str());
+        client.publish( (mqtt.device_name + "/dht11_temp").c_str(), String(t).c_str());
     }
 }
 
@@ -337,7 +357,7 @@ void dht11_task(void *pvPara) {
 void wifi_task(void *pvPara){
     Serial.print("Connect to : ");
     Serial.println(wifi.ssid);
-    WiFi.begin(wifi.ssid, wifi.password);
+    WiFi.begin(wifi.ssid.c_str(), wifi.password.c_str());
     while (WiFi.status() != WL_CONNECTED)
     {
         vTaskDelay( 500 / portTICK_PERIOD_MS );
@@ -356,6 +376,7 @@ void wifi_task(void *pvPara){
         vTaskDelay( 500 / portTICK_PERIOD_MS );
         Serial.print(".");
         }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 
@@ -370,30 +391,18 @@ void handle_rx_msg_from_uart(void *pvPara) {
             //UART msg format :   [payload_len][code][6 x MAC][data.....][data_len]
             uint8_t payload_len = Serial.read();
             //UART msg now in buffer :         [code][6 x MAC][data.....][data_len]
-            uint8_t msg[payload_len];
-            Serial.readBytes(msg, payload_len);
-            uint8_t code = msg[0];  
-            switch (code)
+            String msg;
+            uart_msg uart_msg;
+            Serial.readBytes(&msg[0], payload_len);
+            parse_uart_msg(&uart_msg, msg);
+            switch (uart_msg.code)
             {
             case GET_PEER:
-                client.publish( strcat( (char*)mqtt.device_name, "/peerlist" ), "GET" );
+                client.publish( (mqtt.device_name + "/peerlist").c_str(), "GET" );
                 break;
             case FW_MSG:
-                espnow now_msg;
-                memcpy(now_msg.mac_addr, &msg[1], 6);
-                now_msg.len = msg[payload_len - 1];
-                memcpy(now_msg.data, &msg[7], now_msg.len);
-                uint8_t code = now_msg.data[0];
-                // switch (code)
-                // {
-                // case /* constant-expression */:
-                //     /* code */
-                //     break;
-                
-                // default:
-                //     break;
-                // }
-                // break;
+
+                break;
             }
         }
     }
@@ -420,17 +429,19 @@ void process_mqtt_msg(void *pvPara){
  * @param pvPara 
  */
 void mqtt_task(void *pvPara) {
-    client.setServer(mqtt.server, 1883);
+    client.setServer(mqtt.server.c_str(), 1883);
     client.setCallback(mqtt_callback);
     while(1) {
-        while (!client.connected()) {
+        if(!client.connected()) {
         Serial.print("Attempting MQTT connection...");
         // Attempt to connect
         if (client.connect("WiFiClient")) {
         Serial.println("connected");
-        client.publish( strcat( (char*)mqtt.device_name, "/devicestate") , "ON");
+        client.publish( (mqtt.device_name + "/devicestate").c_str() , "ON");
+        client.subscribe( (mqtt.device_name + "/output1").c_str() );
+        // client.publish( "esp32/devicestate", "ON");
         // Subscribe
-        client.subscribe( strcat( (char*)mqtt.device_name, "/output1" ) );
+        // client.subscribe( strcat( (char*)mqtt.device_name, "/output1" ) );
         // client.subscribe( strcat( (char*)mqtt.device_name, "/output2" ) );
         // client.subscribe( strcat( (char*)mqtt.device_name, "/output3" ) );
         // client.subscribe( strcat( (char*)mqtt.device_name, "/output4" ) );
@@ -442,6 +453,7 @@ void mqtt_task(void *pvPara) {
             vTaskDelay(5000 / portTICK_PERIOD_MS);
             }
         }
+        client.loop();
     }
 }
 
@@ -462,14 +474,14 @@ void save_credentials(void *pvPara) {
  */
 void setup() {
     Serial.begin(115200);
-
+    pinMode(D_OUTPUT_PIN_1, OUTPUT);
     wifi.ssid = "Phi Hung";
     wifi.password = "26022000";
 
-    mqtt.server = "192.168.1.21";
+    mqtt.server = "192.168.1.10";
     // mqtt.user_name = "user";
     // mqtt.password = "password";
-    // mqtt.device_name = "esp32";
+    mqtt.device_name = "esp32";
 
     touch_1_smp = xSemaphoreCreateBinary();
     // touch_2_smp = xSemaphoreCreateBinary();
@@ -477,6 +489,9 @@ void setup() {
     // touch_4_smp = xSemaphoreCreateBinary();
 
     xTaskCreate(wifi_task, "WiFi_task", 3072, NULL, 10, &wifi_task_handle);
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+    xTaskCreate(mqtt_task, "mqtt task", 4096, NULL, 10, NULL);
 
     vTaskDelete(NULL);
 }
