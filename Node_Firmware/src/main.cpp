@@ -1,5 +1,5 @@
 //Include essential libraries
-#include "main.h"
+#include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>

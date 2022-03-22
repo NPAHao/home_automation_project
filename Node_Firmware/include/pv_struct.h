@@ -1,4 +1,4 @@
-#include "main.h"
+#include <Arduino.h>
 
 struct espnow {
     String mac_addr;

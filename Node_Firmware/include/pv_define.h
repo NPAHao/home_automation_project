@@ -1,4 +1,4 @@
-#include "main.h"
+#include <Arduino.h>
 
 //Define macro
 #define DHT11_PIN           19

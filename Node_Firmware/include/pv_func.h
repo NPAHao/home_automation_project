@@ -1,4 +1,4 @@
-#include "main.h"
+#include <Arduino.h>
 #include "pv_define.h"
 #include "pv_struct.h"
 
