@@ -15,3 +15,10 @@
 // #define TOUCH_PIN_3         36
 // #define TOUCH_PIN_4         39
 
+//uart msg code
+#define FW_MSG              0x00        //receive
+#define GET_PEER            0x01        //receive
+#define ADD_PEER            0x02        //send
+#define DEL_PEER            0x03        //send
+#define SEND_DONE           0x04        //send
+#define SEND_ESPNOW         0x05        //send

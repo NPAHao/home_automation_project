@@ -6,14 +6,7 @@
 #include <DHT.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include "pv_wifi.h"
-#include "pv_gpio.h"
-#include "pv_uart.h"
-#include "pv_mqtt.h"
-// #include "pv_espnow.h"
-
-
-//Define typedef
+#include "pv_func.h"
 
 
 //Declare global varialble
@@ -48,8 +41,8 @@ SemaphoreHandle_t   touch_1_smp = NULL;
  * @param length Length of message, in byte
  */
 void mqtt_callback(char* topic, byte* message, unsigned int length){
-    String msgTemp;
     String topicTemp = String(topic);
+    String msgTemp;
     for(int i = 0; i < length; i++) {
         msgTemp += (char)message[i];
     }
@@ -60,12 +53,15 @@ void mqtt_callback(char* topic, byte* message, unsigned int length){
             client.publish( (mqtt.device_name + "/output1stt").c_str(), digitalRead(D_OUTPUT_PIN_1)?"ON":"OFF");
         }
     } else if( topicTemp == (mqtt.device_name + "/peerlistsend") ) {
+        struct msg {
+            uint8_t uart_len = 9;
+            uint8_t code = ADD_PEER;
+            uint8_t mac_addr[6];
+            uint8_t data_len = 0;
+        } msg;
         for(int i = 0; i < length; i+= 6) {
-            uint8_t msg[8];
-            msg[0] = 7;
-            msg[1] = ADD_PEER;
-            memcpy(&msg[2], message + i, 6);
-            Serial.write(msg, 8);
+            memcpy(msg.mac_addr, &msgTemp[i], 6);    //MAC_ADDR
+            Serial2.write((uint8_t *)&msg, 9);
         }
     } else if( topicTemp == (mqtt.device_name + "/alertconfirm") ) {
         //send confirm uart msg
@@ -91,7 +87,7 @@ void IRAM_ATTR d_input_pin_1_isr() {
 void gpio_task(void *pvPara) {
     pinMode(D_OUTPUT_PIN_1, OUTPUT);
 
-    pinMode(TOUCH_PIN_1, INPUT_PULLDOWN);
+    pinMode(TOUCH_PIN_1, INPUT);
 
     attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_1), touch_pin_1_isr, RISING);
 
@@ -188,8 +184,8 @@ void wifi_task(void *pvPara){
     while (1)
     {
         if(WiFi.status() != WL_CONNECTED) {
-        vTaskDelay( 500 / portTICK_PERIOD_MS );
-        Serial.print(".");
+            vTaskDelay( 500 / portTICK_PERIOD_MS );
+            Serial.print(".");
         }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
@@ -202,13 +198,13 @@ void wifi_task(void *pvPara){
  */
 void handle_rx_msg_from_uart(void *pvPara) {
     while(1) {
-        if(Serial.available() > 0) {
+        if(Serial2.available() > 0) {
             //UART msg format :   [payload_len][code][6 x MAC][data.....][data_len]
-            uint8_t payload_len = Serial.read();
+            uint8_t payload_len = Serial2.read();
             //UART msg now in buffer :         [code][6 x MAC][data.....][data_len]
             String msg;
             uart_msg uart_msg;
-            Serial.readBytes(&msg[0], payload_len);
+            Serial2.readBytes(&msg[0], payload_len);
             parse_uart_msg(&uart_msg, msg);
             switch (uart_msg.code)
             {
@@ -216,24 +212,10 @@ void handle_rx_msg_from_uart(void *pvPara) {
                 client.publish( (mqtt.device_name + "/peerlist").c_str(), "GET" );
                 break;
             case FW_MSG:
-
+                
                 break;
             }
         }
-    }
-}
-
-
-/**
- * @brief When incoming MQTT msg is complete save into queue, this task will be get change to run
- * 
- * @param pvPara 
- */
-void process_mqtt_msg(void *pvPara){
-    while (1)
-    {
-        
-        /* code */
     }
 }
 
