@@ -53,15 +53,15 @@ void mqtt_callback(char* topic, byte* message, unsigned int length){
             client.publish( (mqtt.device_name + "/output1stt").c_str(), digitalRead(D_OUTPUT_PIN_1)?"ON":"OFF");
         }
     } else if( topicTemp == (mqtt.device_name + "/peerlistsend") ) {
-        struct msg {
-            uint8_t uart_len = 9;
-            uint8_t code = ADD_PEER;
-            uint8_t mac_addr[6];
-            uint8_t data_len = 0;
-        } msg;
+        uart_msg msg;
+        msg.code = ADD_PEER;
+        msg.now_msg.len = 0;
         for(int i = 0; i < length; i+= 6) {
-            memcpy(msg.mac_addr, &msgTemp[i], 6);    //MAC_ADDR
+            for(int j =0; j < 6; j++) {
+                msg.now_msg.mac_addr += msgTemp[i+j];
+            }
             Serial2.write((uint8_t *)&msg, 9);
+            msg.now_msg.mac_addr.clear();
         }
     } else if( topicTemp == (mqtt.device_name + "/alertconfirm") ) {
         //send confirm uart msg
