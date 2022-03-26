@@ -20,7 +20,7 @@
 #define SENSOR_SWICH        12
 #define SENSOR_PIN          13
 #define SENSOR_READY_DELAY  500
-#define EEPROM_USAGE        32
+#define EEPROM_USAGE        128
 #define DHTTYPE             DHT11
 
 //define esp now message code
@@ -29,15 +29,17 @@
 #define TRANS_ALERT         0x02
 #define CONFIRM_ALERT       0x03
 
+uint8_t broadcast_addr[]          = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+int     device_type_eeprom_addr   = 0;
+int     mac_eeprom_addr           = 1;
+int     publish_topic_leng_addr   = 7;
+int     publish_topic_name_addr   = 8;
 uint8_t device_type;
-uint8_t broadcast_addr[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-uint8_t para_exist_eeprom_addr = 0;
-uint8_t des_mac_eeprom_addr = 1;
-uint8_t device_type_eeprom_addr = 7;
-uint8_t des_mac[6];
-bool ping_reply;
-bool send_alert_result;
-bool confirm_alert_result;
+uint8_t mac_address[6];
+String  publish_topic_name;
+bool    ping_reply;
+bool    send_alert_result;
+bool    confirm_alert_result;
 
 void blink_led(int times);
 
@@ -72,7 +74,7 @@ void setup() {
   //check up for clear eeprom mode
   if(digitalRead(CLEAR_EEPROM_PIN) == 0) {
     reset_eeprom();
-    blink_led(3);
+    blink_led(5);
     ESP.deepSleep(0);
   }
   //check up for is parameter already exist
@@ -85,7 +87,7 @@ void setup() {
   //check up sensor is active
   if(check_sensor_is_active(device_type)) {
     setup_esp_now();
-    get_mac_addr(des_mac);
+    get_mac_addr(mac_address);
     send_esp_now(device_type);
     while(confirm_alert_result != true)
       delay(500);
@@ -107,7 +109,7 @@ void blink_led(int times) {
 }
 
 void send_msg_cb(u8 *mac_addr, u8 status) {
-  if(memcmp(mac_addr, des_mac, 6) == 0) {
+  if(memcmp(mac_addr, mac_address, 6) == 0) {
     send_alert_result = (status==0)?true:false;
   }
 }
@@ -121,28 +123,28 @@ void recv_msg_cb(u8 *mac_addr, u8 *data, u8 len) {
     uint8_t code = doc["code"];
     switch (code)
     {
-      case PING_REQUEST:
-        break;
       case PING_REPLY:
       {
         ping_reply = true;
         EEPROM.begin(EEPROM_USAGE);
         for (int i = 0; i < 6; i++) {
-          EEPROM.write(des_mac_eeprom_addr + i, mac_addr[i]);
+          EEPROM.write(mac_eeprom_addr + i, mac_addr[i]);
         }
-        uint8_t dv_type = doc["type"];
+        uint8_t dv_type = doc["device_type"];
         EEPROM.write(device_type_eeprom_addr, dv_type);
-        EEPROM.write(para_exist_eeprom_addr, 1);
+        char *buffer = doc["publish_topic"];
+        String topic = String(buffer);
+        EEPROM.write(publish_topic_leng_addr, topic.length());
+        for (int i = 0; i < topic.length(); i++) {
+          EEPROM.write(publish_topic_name_addr + i, topic[i]);
+        }
         EEPROM.commit();
         EEPROM.end();
         break;
       }
-      case TRANS_ALERT:
-
-        break;
       case CONFIRM_ALERT:
       {
-        confirm_alert_result = (memcmp(des_mac, mac_addr, 6) == 0)?true:false;
+        confirm_alert_result = (memcmp(mac_address, mac_addr, 6) == 0)?true:false;
         break;
       }
     }
@@ -193,7 +195,7 @@ void setup_sensor_gpio(uint8_t type) {
 bool check_parameter() {
   uint8_t check_result = 0;
   EEPROM.begin(EEPROM_USAGE);
-  check_result = EEPROM.read(para_exist_eeprom_addr);
+  check_result = EEPROM.read(device_type_eeprom_addr);
   EEPROM.end();
   if(check_result == 0) {
     return false;
@@ -238,7 +240,7 @@ void ping_master() {
 void get_mac_addr(uint8_t *mac_addr) {
   EEPROM.begin(EEPROM_USAGE);
   for (int i = 0; i < 6; i++) {
-    *(mac_addr + i) = EEPROM.read(des_mac_eeprom_addr + i);
+    *(mac_addr + i) = EEPROM.read(mac_eeprom_addr + i);
   }
   EEPROM.end();
 }
@@ -249,7 +251,7 @@ void get_device_type(uint8_t *dv_type) {
 }
 
 void send_esp_now(uint8_t type) {
-  esp_now_add_peer(des_mac, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+  esp_now_add_peer(mac_address, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
   DynamicJsonDocument doc(256);
   String jsondata = "";
   doc["code"] = TRANS_ALERT;
@@ -258,7 +260,7 @@ void send_esp_now(uint8_t type) {
   send_alert_result = false;
   confirm_alert_result = false;
   while (send_alert_result != true) {
-    esp_now_send(des_mac, (uint8_t *)jsondata.c_str(), sizeof(jsondata) + 2);
+    esp_now_send(mac_address, (uint8_t *)jsondata.c_str(), sizeof(jsondata) + 2);
     delay(500);
   }
 }
