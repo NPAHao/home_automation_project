@@ -5,6 +5,7 @@
 #include <DHT.h>
 #include <Adafruit_Sensor.h>
 #include <ArduinoJson.h>
+#include <StreamUtils.h>
 
 
 //define device type
@@ -16,32 +17,34 @@
 #define GAS_SENSOR          0x06
 
 //define pin
-#define CLEAR_EEPROM_PIN    4
-#define SENSOR_SWICH        12
+#define EEPROM_PIN          4
+#define SENSOR_SWICH_PIN    12
 #define SENSOR_PIN          13
 #define SENSOR_READY_DELAY  500
-#define EEPROM_USAGE        128
+#define EEPROM_USAGE        512
 #define DHTTYPE             DHT11
 
 //define esp now message code
-#define PING_REQUEST        0x00
-#define PING_REPLY          0x01
-#define TRANS_ALERT         0x02
-#define CONFIRM_ALERT       0x03
+#define INFOR_REQUEST       0x00    //send
+#define INFOR_RESPOND       0x01    //receive
+#define MSG_SEND            0x02    //send
+#define MSG_CONFIRM         0x03    //receive
 
 uint8_t broadcast_addr[]          = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-int     device_type_eeprom_addr   = 0;
-int     mac_eeprom_addr           = 1;
-int     publish_topic_leng_addr   = 7;
-int     publish_topic_name_addr   = 8;
 uint8_t device_type;
 uint8_t mac_address[6];
 String  publish_topic_name;
-bool    ping_reply;
-bool    send_alert_result;
-bool    confirm_alert_result;
+bool    infor_responded;
+bool    send_result;
+bool    confirm_result;
+
+EepromStream infor(0, EEPROM_USAGE);
 
 void blink_led(int times);
+
+bool check_eeprom_pin(uint8_t eeprom_pin);
+
+bool check_infor();
 
 void send_msg_cb(u8 *mac_addr, u8 status);
 
@@ -53,50 +56,39 @@ void setup_esp_now();
 
 void setup_sensor_gpio(uint8_t type);
 
-bool check_parameter();
-
 bool check_sensor_is_active(uint8_t type);
 
-void ping_master();
+void send_infor_request_msg();
 
-void get_mac_addr(uint8_t *mac_addr);
+void get_device_infor();
 
-void get_device_type(uint8_t *dv_type);
-
-void send_esp_now(uint8_t type);
+void send_esp_now(uint8_t type, String topic);
 
 void setup() {
-  device_type = FLAME_SENSOR;
-  //set up pin
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH);
-  pinMode(CLEAR_EEPROM_PIN, INPUT_PULLUP);
-  //check up for clear eeprom mode
-  if(digitalRead(CLEAR_EEPROM_PIN) == 0) {
+  if(check_eeprom_pin(EEPROM_PIN)) {
     reset_eeprom();
-    blink_led(5);
-    ESP.deepSleep(0);
   }
-  //check up for is parameter already exist
-  if(check_parameter() != true) {
+  if(check_infor() != true) {
     setup_esp_now();
-    ping_master();
+    send_infor_request_msg();
   }
-  get_device_type(&device_type);
-  setup_sensor_gpio(device_type);
-  //check up sensor is active
-  if(check_sensor_is_active(device_type)) {
-    setup_esp_now();
-    get_mac_addr(mac_address);
-    send_esp_now(device_type);
-    while(confirm_alert_result != true)
-      delay(500);
-  }
-  ESP.deepSleep(5e6);
+  //B2: (check infor)?(tiếp tục):(yêu cầu infor-chờ và ghi infor vào eeprom)
+  //B3: cài đặt gpio theo kiểu cảm biến
+  //B4: (cảm biến tích cực)?(setup esnow-gửi msg):(deepsleep theo số giây)
 }
 
 void loop() {
   //never get here
+}
+
+/**
+ * @return true to clear, false to continue
+ */
+bool check_eeprom_pin(uint8_t eeprom_pin) {
+  pinMode(eeprom_pin, INPUT_PULLUP);
+  delay(5);
+  bool check = digitalRead(eeprom_pin)?false:true;
+  return check;
 }
 
 void blink_led(int times) {
@@ -110,11 +102,12 @@ void blink_led(int times) {
 
 void send_msg_cb(u8 *mac_addr, u8 status) {
   if(memcmp(mac_addr, mac_address, 6) == 0) {
-    send_alert_result = (status==0)?true:false;
+    send_result = (status==0)?true:false;
   }
 }
 
 void recv_msg_cb(u8 *mac_addr, u8 *data, u8 len) {
+  String mac = String((char *)mac_addr);
   char *buff = (char *)data;
   DynamicJsonDocument doc(256);
   String jsondata = String(buff);
@@ -123,28 +116,22 @@ void recv_msg_cb(u8 *mac_addr, u8 *data, u8 len) {
     uint8_t code = doc["code"];
     switch (code)
     {
-      case PING_REPLY:
+      case INFOR_RESPOND:
       {
-        ping_reply = true;
+        infor_responded = true;
         EEPROM.begin(EEPROM_USAGE);
-        for (int i = 0; i < 6; i++) {
-          EEPROM.write(mac_eeprom_addr + i, mac_addr[i]);
-        }
-        uint8_t dv_type = doc["device_type"];
-        EEPROM.write(device_type_eeprom_addr, dv_type);
-        char *buffer = doc["publish_topic"];
-        String topic = String(buffer);
-        EEPROM.write(publish_topic_leng_addr, topic.length());
-        for (int i = 0; i < topic.length(); i++) {
-          EEPROM.write(publish_topic_name_addr + i, topic[i]);
-        }
+        DynamicJsonDocument sudo_doc(256);
+        sudo_doc["device_type"] = doc["device_type"];
+        sudo_doc["mac_addr"] = 1;
+        // lưu độ dài chuỗi json vào address 0
+        // lưu chuỗi json về loại cảm biến, địa chỉ mac, publish topic vào eeprom   
         EEPROM.commit();
         EEPROM.end();
         break;
       }
-      case CONFIRM_ALERT:
+      case MSG_CONFIRM:
       {
-        confirm_alert_result = (memcmp(mac_address, mac_addr, 6) == 0)?true:false;
+        confirm_result = (memcmp(mac_address, mac_addr, 6) == 0)?true:false;
         break;
       }
     }
@@ -192,10 +179,14 @@ void setup_sensor_gpio(uint8_t type) {
   }
 }
 
-bool check_parameter() {
+
+/**
+ * @return true if infor exists, false if infor is empty
+ */
+bool check_infor() {
   uint8_t check_result = 0;
   EEPROM.begin(EEPROM_USAGE);
-  check_result = EEPROM.read(device_type_eeprom_addr);
+  check_result = EEPROM.read(0);
   EEPROM.end();
   if(check_result == 0) {
     return false;
@@ -223,43 +214,34 @@ bool check_sensor_is_active(uint8_t type) {
   return false;
 }
 
-void ping_master() {
+void send_infor_request_msg() {
   esp_now_add_peer(broadcast_addr, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
-  ping_reply = false;
+  infor_responded = false;
   DynamicJsonDocument doc(256);
-  String jsondata = "";
-  doc["code"] = PING_REQUEST;
-  doc["payload"] = 0xff;
+  String jsondata;
+  doc["code"] = INFOR_REQUEST;
+  doc["payload"] = "infor";
   serializeJson(doc, jsondata);
-  while (ping_reply != true) {
+  while (infor_responded != true) {
     esp_now_send(broadcast_addr, (uint8_t *)jsondata.c_str(), sizeof(jsondata) + 2);
     delay(500);
   }
 }
 
-void get_mac_addr(uint8_t *mac_addr) {
-  EEPROM.begin(EEPROM_USAGE);
-  for (int i = 0; i < 6; i++) {
-    *(mac_addr + i) = EEPROM.read(mac_eeprom_addr + i);
-  }
-  EEPROM.end();
-}
-void get_device_type(uint8_t *dv_type) {
-  EEPROM.begin(EEPROM_USAGE);
-  *dv_type = EEPROM.read(device_type_eeprom_addr);
-  EEPROM.end();
+void get_device_infor(uint8_t *mac_addr) {
+
 }
 
-void send_esp_now(uint8_t type) {
+void send_esp_now(uint8_t type, String topic) {
   esp_now_add_peer(mac_address, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
   DynamicJsonDocument doc(256);
   String jsondata = "";
-  doc["code"] = TRANS_ALERT;
-  doc["payload"] = 0xff;
+  doc["code"] = MSG_SEND;
+  doc["topic"] = topic;
   serializeJson(doc, jsondata);
-  send_alert_result = false;
-  confirm_alert_result = false;
-  while (send_alert_result != true) {
+  send_result = false;
+  confirm_result = false;
+  while (send_result != true) {
     esp_now_send(mac_address, (uint8_t *)jsondata.c_str(), sizeof(jsondata) + 2);
     delay(500);
   }
