@@ -14,8 +14,7 @@ TaskHandle_t wifi_task_handle;
 
 
 //Declare Object
-Preferences preferences;
-
+Preferences pref;
 
 //Declare semaphore
 SemaphoreHandle_t   touch_1_smp = NULL;
@@ -32,19 +31,6 @@ void IRAM_ATTR d_input_pin_1_isr() {
 
 
                                 //Task Define
-/**
- * @brief GPIO setup and control task
- * 
- * @param pvPara 
- */
-void gpio_task(void *pvPara) {
-    pinMode(D_OUTPUT_PIN_1, OUTPUT);
-    pinMode(TOUCH_PIN_1, INPUT);
-    attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_1), touch_pin_1_isr, RISING);
-    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_1), d_input_pin_1_isr, RISING);
-    touch_1_smp = xSemaphoreCreateBinary(); 
-}
-
 void touch_pin_1_task(void *pvPara) {
     uint8_t time;
     while (1)
@@ -58,17 +44,21 @@ void touch_pin_1_task(void *pvPara) {
             }
             if( (time == 1) && digitalRead(TOUCH_PIN_1) ) {
                 //client.publish( (mqtt.user_name + "/touch1").c_str(), "longtouch");
+                Serial.println("long detect");
             } else {
                 switch (time)
                 {
                 case 1:
                     //client.publish( (mqtt.user_name + "/touch1").c_str(), "singletouch");
+                    Serial.println("single touch detect");
                     break;
                 case 2:
                     //client.publish( (mqtt.user_name + "/touch1").c_str(), "doubletouch");
+                    Serial.println("double touch detect");
                     break;
                 case 3:
                     //client.publish( (mqtt.user_name + "/touch1").c_str(), "trippletouch");
+                    Serial.println("triple touch detect");
                     break;               
                 }
             }
@@ -76,6 +66,15 @@ void touch_pin_1_task(void *pvPara) {
     }
 }
 
+void gpio_task(void *pvPara) {
+    pinMode(D_OUTPUT_PIN_1, OUTPUT);
+    pinMode(TOUCH_PIN_1, INPUT);
+    attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_1), touch_pin_1_isr, RISING);
+    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_1), d_input_pin_1_isr, RISING);
+    touch_1_smp = xSemaphoreCreateBinary();
+    xTaskCreate(touch_pin_1_task, "touch 1", 2048, NULL, 10, NULL);
+    vTaskDelete(NULL);
+}
 
 /**
  * @brief This task will setup DHT11 and send data periodly 10s
@@ -111,6 +110,7 @@ void dht11_task(void *pvPara) {
  */
 void setup() {
     Serial.begin(115200);
+    xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
     vTaskDelete(NULL);
 }
 
