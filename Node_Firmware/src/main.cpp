@@ -5,12 +5,7 @@
 #include <Preferences.h>
 #include <DHT.h>
 #include "pv_define.h"
-
-
-//Declare task handle variable
-TaskHandle_t gpio_task_handle;
-TaskHandle_t dht11_task_handle;
-TaskHandle_t wifi_task_handle;
+#include <ArduinoJson.h>
 
 
 //Declare Object
@@ -18,6 +13,10 @@ Preferences pref;
 
 //Declare semaphore
 SemaphoreHandle_t   touch_1_smp = NULL;
+
+//Variable
+String  name = "esp32";
+String  mac_addr;
 
 
                                 //Callback Function
@@ -27,6 +26,36 @@ void IRAM_ATTR touch_pin_1_isr() {
 
 void IRAM_ATTR d_input_pin_1_isr() {
     // client.publish( (mqtt.user_name+ "d_input1").c_str(), "strigg");
+    DynamicJsonDocument doc(250);
+    String json;
+    doc["from"] = "node";
+    doc["purpose"] = "publish";
+    doc["topic"] = name + '/' + "d_input1";
+    doc["payload"] = "ACTIVE";
+    serializeJson(doc, json);
+    esp_now_send((uint8_t *)mac_addr.c_str(), (uint8_t *)json.c_str(), json.length());
+}
+
+void recv_cb(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+    DynamicJsonDocument doc(250);
+    deserializeJson(doc, data);
+    String from = doc["from"];
+    String purpose = doc["purpose"];
+    if(from == "hub") {
+        if(purpose == "add node") {
+
+        } else if(purpose == "add subnode") {
+
+        } else if(purpose == "control") {
+
+        }
+    } else if(from == "subnode") {
+        if(purpose == "send data") {
+            
+        } else if(purpose == "add success") {
+
+        }
+    }
 }
 
 
@@ -35,6 +64,11 @@ void touch_pin_1_task(void *pvPara) {
     uint8_t time;
     while (1)
     {
+        DynamicJsonDocument doc(250);
+        String json;
+        doc["from"] = "node";
+        doc["purpose"] = "publish";
+        doc["topic"] = name + '/' + "touch_1";
         time = 0;
         if( xSemaphoreTake( touch_1_smp , portMAX_DELAY) == pdTRUE ) {
             time++;
@@ -44,27 +78,30 @@ void touch_pin_1_task(void *pvPara) {
             }
             if( (time == 1) && digitalRead(TOUCH_PIN_1) ) {
                 //client.publish( (mqtt.user_name + "/touch1").c_str(), "longtouch");
-                Serial.println("long detect");
+                doc["payload"] = "long touch";
             } else {
                 switch (time)
                 {
                 case 1:
                     //client.publish( (mqtt.user_name + "/touch1").c_str(), "singletouch");
-                    Serial.println("single touch detect");
+                    doc["payload"] = "single touch";
                     break;
                 case 2:
                     //client.publish( (mqtt.user_name + "/touch1").c_str(), "doubletouch");
-                    Serial.println("double touch detect");
+                    doc["payload"] = "double touch";
                     break;
                 case 3:
                     //client.publish( (mqtt.user_name + "/touch1").c_str(), "trippletouch");
-                    Serial.println("triple touch detect");
+                    doc["payload"] = "triple touch";
                     break;               
                 }
             }
+            serializeJson(doc, json);
+            esp_now_send((uint8_t *)mac_addr.c_str(), (uint8_t *)json.c_str(), json.length());
         }
     }
 }
+
 
 void gpio_task(void *pvPara) {
     pinMode(D_OUTPUT_PIN_1, OUTPUT);
@@ -76,11 +113,7 @@ void gpio_task(void *pvPara) {
     vTaskDelete(NULL);
 }
 
-/**
- * @brief This task will setup DHT11 and send data periodly 10s
- * 
- * @param pvPara 
- */
+
 void dht11_task(void *pvPara) {
     DHT dht(DHT11_PIN, DHT11);
     dht.begin();
@@ -104,14 +137,20 @@ void dht11_task(void *pvPara) {
 }
 
 
-/**
- * @brief setup task
- * 
- */
+void wireless_init(void *pv) {
+    WiFi.mode(WIFI_MODE_STA);
+    WiFi.disconnect();
+    esp_now_init();
+    esp_now_register_recv_cb(recv_cb);
+    vTaskDelete(NULL);
+}
+
+
 void setup() {
     Serial.begin(115200);
-    xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
-    vTaskDelete(NULL);
+    // xTaskCreate(wireless_init, "espnow init", 2048, NULL, 10, NULL);
+    // // xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
+    // vTaskDelete(NULL);
 }
 
 
