@@ -25,7 +25,7 @@ void setup_wifi(void *pv) {
   psk = pref.getString("psk", "");
   if( (ssid == "") || (psk == "")) {
     WiFi.beginSmartConfig();
-    Serial.println("begin smartconfig");
+    Serial.println("begin smartconfig"); 
     while (!WiFi.smartConfigDone()) {
       vTaskDelay(500 / portTICK_PERIOD_MS);
       Serial.print('.');
