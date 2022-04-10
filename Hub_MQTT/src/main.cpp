@@ -2,13 +2,21 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
+#include <PubSubClient.h>
 
+//task handle
 TaskHandle_t wifi_task_handle;
 
+//global variable
 Preferences pref;
 String      ssid;
 String      psk;
+String      mqtt_server = "192.168.1.12";
+WiFiClient  espClient;
+PubSubClient client(espClient);
 
+
+// callback function
 void on_disconnect_wifi(WiFiEvent_t event, WiFiEventInfo_t info) {
   WiFi.begin(ssid.c_str(), psk.c_str());
 }
@@ -19,7 +27,13 @@ void on_connect_wifi(WiFiEvent_t event, WiFiEventInfo_t info) {
   vTaskDelete(wifi_task_handle);
 }
 
-void setup_wifi(void *pv) {
+void mqtt_cb(char* topic, byte* message, unsigned int length) {
+
+}
+
+
+// task code
+void wifi_task(void *pv) {
   pref.begin("credential", false);
   ssid = pref.getString("ssid", "");
   psk = pref.getString("psk", "");
@@ -47,11 +61,39 @@ void setup_wifi(void *pv) {
   }
 }
 
+void mqtt_task(void *pv) {
+  client.setServer(mqtt_server.c_str(), 1883);
+  client.setCallback(mqtt_cb);
+  while (1)
+  {
+    if(!client.connected()){
+      if(client.connect("esp32")){
+        client.subscribe("abc");
+      }
+    }
+  }
+}
+
+void receive_uart_task() {
+  Serial2.begin(115200);
+  while (1)
+  {
+    if(Serial2.available() > 0) {
+      DynamicJsonDocument doc(250);
+      deserializeJson(doc, Serial2);
+      String from = doc["from"];
+      String purpose = doc["purpose"];
+      String topic = doc["topic"];
+      String payload = doc["payload"];
+
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-  Serial2.begin(115200);
   WiFi.mode(WIFI_MODE_STA);
-  xTaskCreate(setup_wifi, "wifi task", 2048, NULL, 10, &wifi_task_handle);
+  xTaskCreate(wifi_task, "wifi task", 2048, NULL, 10, &wifi_task_handle);
   vTaskDelete(NULL);
 }
 

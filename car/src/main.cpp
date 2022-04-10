@@ -27,14 +27,20 @@ void esp_task(void *pv) {
   }
 }
 
-
-
 void setup() {
   Serial.begin(115200);
-  xTaskCreate(esp_task, "init task", 2048, NULL, 10, NULL);
-  vTaskDelete(NULL);
+  DynamicJsonDocument doc(250);
+  doc["test"] = "hello";
+  const char *a = nullptr;
+  a = doc["test"];
+  if(String(a) == "") {
+    Serial.println("check");
+  } else Serial.println(a[4]);
+  // xTaskCreate(esp_task, "init task", 2048, NULL, 10, NULL);
+  // vTaskDelete(NULL);
 }
 
 void loop() {
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
   // put your main code here, to run repeatedly:
 }

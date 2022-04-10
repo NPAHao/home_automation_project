@@ -2,8 +2,6 @@
 #include <ESP8266WiFi.h>
 #include <EEPROM.h>
 #include <espnow.h>
-#include <DHT.h>
-#include <Adafruit_Sensor.h>
 #include <ArduinoJson.h>
 #include <StreamUtils.h>
 
@@ -15,14 +13,13 @@
 #define SENSOR_SOURCE_PIN   12
 #define SENSOR_DATA_PIN     13
 #define EEPROM_USAGE        512
-#define DHTTYPE             DHT11
 
 
-uint8_t broadcast_addr[]          = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-String  device_type;
+uint8_t broadcast_addr[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+String mac_address;
+String device_type;
 uint8_t interval;
-String  mac_address;
-String  topic;               
+String topic;
 bool    get_infor_result;
 bool    send_result;
 
@@ -32,14 +29,14 @@ void send_msg_cb(u8 *mac_addr, u8 status) {
 }
 
 void recv_msg_cb(u8 *mac_addr, u8 *data, u8 len) {
-  String mac = String( (char *)mac_addr );
   DynamicJsonDocument doc(512);
   DeserializationError error = deserializeJson(doc, data);
   if(!error) {
-    String from = doc["from"];
-    String purpose = doc["purpose"];
-    if( (from == "node") && (purpose == "add subnode")) {
-      doc["mac addr"] = mac;
+    String from     =   String((const char *)doc["from"]);
+    String to       =   String((const char *)doc["to"]);
+    String purpose  =   String((const char *)doc["purpose"]);
+    if( (from == "node") && (to == "subnode") && (purpose == "add subnode")) {
+      doc["mac addr"] = String((const char *)mac_addr);
       EepromStream infor(0, EEPROM_USAGE);
       EEPROM.begin(EEPROM_USAGE);
       serializeJson(doc, infor);
@@ -75,45 +72,11 @@ void blink_led(int times) {
   }
 }
 
-bool check_infor() {
-  uint8_t check_result = 0;
-  EEPROM.begin(EEPROM_USAGE);
-  check_result = EEPROM.read(0);
-  EEPROM.end();
-  if(check_result == 0) {
-    return false;
-  }
-  else return true;
-}
-
 void setup_esp_now() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   esp_now_init();
   esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-}
-
-void waiting_infor() {
-  esp_now_register_recv_cb(recv_msg_cb);
-  get_infor_result = false;
-  while (!get_infor_result) {
-    blink_led(1);
-  }
-  esp_now_add_peer((uint8_t *)mac_address.c_str(), ESP_NOW_ROLE_COMBO, 1, NULL, 0);
-  DynamicJsonDocument doc(250);
-  String str;
-  doc["form"] = "subnode";
-  doc["purpose"] = "add success";
-  serializeJson(doc, str);
-  esp_now_register_send_cb(send_msg_cb);
-  send_result = false;
-  while (!send_result) {
-    esp_now_send((uint8_t *)mac_address.c_str(),(uint8_t *)str.c_str(), str.length());
-    blink_led(1);
-  }
-  esp_now_del_peer((uint8_t *)mac_address.c_str());
-  esp_now_unregister_send_cb();
-  esp_now_unregister_recv_cb();
 }
 
 bool get_device_infor() {
@@ -123,13 +86,39 @@ bool get_device_infor() {
   DeserializationError error = deserializeJson(doc, infor_in_eeprom);
   EEPROM.end();
   if(!error) {
-    device_type = (String)doc["type"];
+    device_type = String((const char *)doc["type"]);
     interval = doc["interval"];
-    mac_address = (String)doc["mac addr"];
-    topic = (String)doc["topic"];
-    //nếu type MQ-2 lấy thêm giá trị RO được lưu lần đầu tiên sau khi reset eeprom
-    return true;
-  } else return false;
+    mac_address = String((const char *)doc["mac addr"]);
+    topic = String((const char *)doc["topic"]);
+  }
+  bool ret = (device_type == "") || (mac_address == "") || (topic == "");
+  return !ret;
+}
+
+void waiting_infor() {
+  esp_now_register_recv_cb(recv_msg_cb);
+  esp_now_register_send_cb(send_msg_cb);
+  get_infor_result = false;
+  while(!get_infor_result){
+    blink_led(1);
+  }
+  get_device_infor();
+  esp_now_add_peer((uint8_t *)mac_address.c_str(), ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+  esp_now_register_send_cb(send_msg_cb);
+  DynamicJsonDocument doc(250);
+  String buffer;
+  doc["from"] = "subnode";
+  doc["to"] = "node";
+  doc["purpose"] = "add success";
+  serializeJson(doc, buffer);
+  send_result = false;
+  while (!send_result) {
+    esp_now_send((uint8_t *)mac_address.c_str(), (uint8_t *)buffer.c_str(), buffer.length());
+    blink_led(1);
+  }
+  esp_now_del_peer((uint8_t *)mac_address.c_str());
+  esp_now_unregister_send_cb();
+  esp_now_unregister_recv_cb();
 }
 
 void setup_sensor_gpio() {
@@ -141,12 +130,7 @@ void setup_sensor_gpio() {
   } else if(device_type == "flood") {
     pinMode(SENSOR_DATA_PIN, INPUT);
     delay(100);
-  } else if(device_type == "DHT11") {
-    pinMode(SENSOR_DATA_PIN, INPUT);
-    delay(2000);
-  } else if(device_type == "MQ-2") {
-    //chờ tìm hiểu
-  } 
+  }
 }
 
 bool is_sensor_active() {
@@ -159,79 +143,54 @@ bool is_sensor_active() {
     int value = digitalRead(SENSOR_DATA_PIN);
     ret = value?false:true;
     return ret;
-  } else if(device_type == "DHT11") {
-    return true;
-  } else if(device_type == "MQ-2") {
-    return true;
   } else return false;
 }
 
 void send_esp_now() {
+  esp_now_add_peer((uint8_t *)mac_address.c_str(), ESP_NOW_ROLE_COMBO, 1, NULL, 0);
+  esp_now_register_send_cb(send_msg_cb);
   DynamicJsonDocument doc(256);
-  String jsondata;
+  String buffer;
   doc["from"] = "subnode";
+  doc["to"] = "node";
   doc["purpose"] = "send data";
   doc["topic"] = topic;
   if(device_type == "flame") {
     doc["payload"] = "FLAME DETECTED!";
   } else if(device_type == "flood") {
     doc["payload"] = "FLOOD DETECTED!";
-  } else if(device_type == "DHT11") {
-    String temperature, huminity;
-    //đọc cảm biến
-    temperature = "31";
-    huminity = "80";
-    doc["payload"]["temp"] = temperature;
-    doc["payload"]["humi"] = huminity;
-  } else if(device_type == "MQ-2") {
-    String co_val, lpg_val, ch4_val;
-    //đọc cảm biến
-    co_val = "200";
-    lpg_val = "200";
-    ch4_val = "200";
-    doc["payload"]["CO"] = co_val;
-    doc["payload"]["LPG"] = lpg_val;
-    doc["payload"]["CH4"] = ch4_val;
   }
-  serializeJson(doc, jsondata);
-  esp_now_add_peer((uint8_t *)mac_address.c_str(), ESP_NOW_ROLE_COMBO, 1, NULL, 0);
-  esp_now_register_send_cb(send_msg_cb);
+  serializeJson(doc, buffer);
   send_result = false;
   while (send_result != true) {
-    esp_now_send((uint8_t *)mac_address.c_str(), (uint8_t *)jsondata.c_str(), jsondata.length());
-    delay(250);
+    esp_now_send((uint8_t *)mac_address.c_str(), (uint8_t *)buffer.c_str(), buffer.length());
+    blink_led(1);
   }
 }
 
 void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
-  if(!check_eeprom_pin()){
-  // if(false) {
+  digitalWrite(LED_BUILTIN, HIGH);
+  if(check_eeprom_pin()){
     reset_eeprom();
     blink_led(5);
-    ESP.deepSleep(0);
-  }
-  if(!check_infor()) {
-  //   if(false) {
-    setup_esp_now();
-    waiting_infor();
+    ESP.restart();
   }
   bool result = get_device_infor();
   if(!result) {
-    blink_led(3);
-    ESP.deepSleep(0);
+    setup_esp_now();
+    waiting_infor();
   }
   setup_sensor_gpio();
   if(!is_sensor_active()) {
-  // if(false) {
     blink_led(1);
     ESP.deepSleep(interval*1e6);
   }
   setup_esp_now();
   send_esp_now();
   blink_led(1);
-  if( (device_type == "flame") || (device_type == "flood") ){
+  if( (device_type == "flame") || (device_type == "flood") ) {
     ESP.deepSleep(0);
   }
   ESP.deepSleep( interval*1e6 );

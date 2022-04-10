@@ -1,4 +1,4 @@
-//Include essential libraries
+//Include necessary libraries
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
@@ -14,62 +14,61 @@ Preferences pref;
 //Declare semaphore
 SemaphoreHandle_t   touch_1_smp = NULL;
 
+//Task handle
+TaskHandle_t    touch_1_handle;
+TaskHandle_t    d_input_1_handle;
+
+//Queue handle
+QueueHandle_t espnow_queue;
+
+//Struct
+struct incoming_msg_infor
+{
+    String mac;
+    String data;
+    int data_len;
+};
+
 //Variable
-String  name = "esp32";
+String  device_name;
 String  mac_addr;
 
 
+
                                 //Callback Function
-void IRAM_ATTR touch_pin_1_isr() {
-    xSemaphoreGiveFromISR(touch_1_smp , NULL);
+void IRAM_ATTR touch_1_isr() {
+    xSemaphoreGiveFromISR(touch_1_smp, pdFALSE);
 }
 
-void IRAM_ATTR d_input_pin_1_isr() {
-    // client.publish( (mqtt.user_name+ "d_input1").c_str(), "strigg");
-    DynamicJsonDocument doc(250);
-    String json;
-    doc["from"] = "node";
-    doc["purpose"] = "publish";
-    doc["topic"] = name + '/' + "d_input1";
-    doc["payload"] = "ACTIVE";
-    serializeJson(doc, json);
-    esp_now_send((uint8_t *)mac_addr.c_str(), (uint8_t *)json.c_str(), json.length());
+void IRAM_ATTR d_input_1_isr() {
+    vTaskNotifyGiveFromISR(d_input_1_handle, pdFALSE);
 }
 
-void recv_cb(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
-    DynamicJsonDocument doc(250);
-    deserializeJson(doc, data);
-    String from = doc["from"];
-    String purpose = doc["purpose"];
-    if(from == "hub") {
-        if(purpose == "add node") {
+void now_send_isr(const uint8_t *mac_addr, esp_now_send_status_t status) {
 
-        } else if(purpose == "add subnode") {
+}
 
-        } else if(purpose == "control") {
-
-        }
-    } else if(from == "subnode") {
-        if(purpose == "send data") {
-            
-        } else if(purpose == "add success") {
-
-        }
-    }
+void now_recv_isr(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+    incoming_msg_infor msg;
+    msg.mac = String((char *)mac_addr);
+    msg.data = String((char *)data);
+    msg.data_len = data_len;
+    xQueueSendFromISR(espnow_queue, &msg, pdFALSE);
 }
 
 
                                 //Task Define
-void touch_pin_1_task(void *pvPara) {
+void touch_1_task(void *pvPara) {
     uint8_t time;
+    DynamicJsonDocument doc(250);
+    String json;
+    doc["from"] = "node";
+    doc["purpose"] = "publish";
+    doc["topic"] = device_name + '/' + "touch_1";
     while (1)
     {
-        DynamicJsonDocument doc(250);
-        String json;
-        doc["from"] = "node";
-        doc["purpose"] = "publish";
-        doc["topic"] = name + '/' + "touch_1";
         time = 0;
+        json = "";
         if( xSemaphoreTake( touch_1_smp , portMAX_DELAY) == pdTRUE ) {
             time++;
             while ( xSemaphoreTake ( touch_1_smp , 500 / portTICK_PERIOD_MS) == pdTRUE) {
@@ -77,25 +76,22 @@ void touch_pin_1_task(void *pvPara) {
                 if(time == 3) break;
             }
             if( (time == 1) && digitalRead(TOUCH_PIN_1) ) {
-                //client.publish( (mqtt.user_name + "/touch1").c_str(), "longtouch");
                 doc["payload"] = "long touch";
             } else {
                 switch (time)
                 {
                 case 1:
-                    //client.publish( (mqtt.user_name + "/touch1").c_str(), "singletouch");
                     doc["payload"] = "single touch";
                     break;
                 case 2:
-                    //client.publish( (mqtt.user_name + "/touch1").c_str(), "doubletouch");
                     doc["payload"] = "double touch";
                     break;
                 case 3:
-                    //client.publish( (mqtt.user_name + "/touch1").c_str(), "trippletouch");
                     doc["payload"] = "triple touch";
                     break;               
                 }
             }
+            // serializeJsonPretty(doc, Serial);
             serializeJson(doc, json);
             esp_now_send((uint8_t *)mac_addr.c_str(), (uint8_t *)json.c_str(), json.length());
         }
@@ -103,37 +99,62 @@ void touch_pin_1_task(void *pvPara) {
 }
 
 
-void gpio_task(void *pvPara) {
-    pinMode(D_OUTPUT_PIN_1, OUTPUT);
-    pinMode(TOUCH_PIN_1, INPUT);
-    attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_1), touch_pin_1_isr, RISING);
-    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_1), d_input_pin_1_isr, RISING);
-    touch_1_smp = xSemaphoreCreateBinary();
-    xTaskCreate(touch_pin_1_task, "touch 1", 2048, NULL, 10, NULL);
-    vTaskDelete(NULL);
+void d_input_1_task(void *pv) {
+    DynamicJsonDocument doc(250);
+    String json;
+    doc["from"] = "node";
+    doc["purpose"] = "publish";
+    doc["topic"] = device_name + '/' + "d_input1";
+    doc["payload"] = "ACTIVE";
+    serializeJson(doc, json);
+    while(1) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    esp_now_send((uint8_t *)mac_addr.c_str(), (uint8_t *)json.c_str(), json.length());
+    }
+}
+
+void recv_cb_task(void *pv) {
+    incoming_msg_infor msg;
+    while (1)
+    {
+        xQueueReceive(espnow_queue, &msg, portMAX_DELAY);
+        DynamicJsonDocument doc(250);
+        deserializeJson(doc, msg.data);
+        String from = doc["from"];
+        String purpose = doc["purpose"];
+        if(from == "hub") {
+            if(purpose == "add node") {
+
+            } else if(purpose == "add subnode") {
+
+            } else if(purpose == "control") {
+
+            }
+        } else if(from == "subnode") {
+            if(purpose == "send data") {
+                
+            } else if(purpose == "add success") {
+
+            }
+        }
+    }
+}
+
+void get_infor_task(void *pv) {
+    pref.begin("infor", true);
+    mac_addr = pref.getString("mac_addr", "");
+    device_name = pref.getString("name", "");
+
 }
 
 
-void dht11_task(void *pvPara) {
-    DHT dht(DHT11_PIN, DHT11);
-    dht.begin();
-    TickType_t xLastWakeTime;
-    xLastWakeTime = xTaskGetTickCount ();
-    while (1)
-    {   
-        vTaskDelayUntil( &xLastWakeTime, 10000 / portTICK_PERIOD_MS);
-        // Reading temperature or humidity takes about 250 milliseconds!
-        float h = dht.readHumidity();
-        // Read temperature as Celsius (the default)
-        float t = dht.readTemperature();
-        // check
-        if (isnan(h) || isnan(t)) {
-            Serial.println(F("Failed to read from DHT sensor!"));
-        }
-        //publish
-        // client.publish( (mqtt.device_name + "/dht11_humi").c_str(), String(h).c_str());
-        // client.publish( (mqtt.device_name + "/dht11_temp").c_str(), String(t).c_str());
-    }
+void gpio_task(void *pvPara) {
+    pinMode(D_OUTPUT_PIN_1, OUTPUT);
+    pinMode(TOUCH_PIN_1, INPUT);
+    attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_1), touch_1_isr, RISING);
+    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_1), d_input_1_isr, RISING);
+    xTaskCreate(touch_1_task, "touch 1", 2048, NULL, 10, NULL);
+    vTaskDelete(NULL);
 }
 
 
@@ -141,16 +162,17 @@ void wireless_init(void *pv) {
     WiFi.mode(WIFI_MODE_STA);
     WiFi.disconnect();
     esp_now_init();
-    esp_now_register_recv_cb(recv_cb);
+    esp_now_register_recv_cb(now_recv_isr);
+    esp_now_register_send_cb(now_send_isr);
     vTaskDelete(NULL);
 }
 
 
 void setup() {
     Serial.begin(115200);
-    // xTaskCreate(wireless_init, "espnow init", 2048, NULL, 10, NULL);
-    // // xTaskCreate(gpio_task, "gpio", 2048, NULL, 10, NULL);
-    // vTaskDelete(NULL);
+    espnow_queue = xQueueCreate(5, sizeof(incoming_msg_infor));
+    touch_1_smp = xSemaphoreCreateBinary();
+    vTaskDelete(NULL);
 }
 
 

@@ -35,7 +35,7 @@ void setup() {
 
 void loop() {
   if(Serial.available() > 0) {
-    DynamicJsonDocument doc(300);
+    DynamicJsonDocument doc(250);
     DeserializationError err = deserializeJson(doc, Serial);
     if (!err)
     {
@@ -52,6 +52,7 @@ void loop() {
         send_result = false;
         while(!send_result) {
           esp_now_send((uint8_t *)mac.c_str(), (uint8_t *)str.c_str(), str.length());
+          delay(50);
         }
         esp_now_del_peer((uint8_t *)mac.c_str());
       }
