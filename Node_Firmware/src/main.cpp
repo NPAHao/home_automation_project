@@ -41,6 +41,7 @@ uint8_t broadcast[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 esp_now_peer_info peer;
 bool    send_result;
 bool    get_infor_result;
+bool    get_infor_complete;
 
 
                                 //Callback Function
@@ -178,7 +179,8 @@ void get_infor_task(void *pvPara) {
         mac_addr = pref.getString("mac_addr", "");
         device_name = pref.getString("name", "");
         pref.end();
-        ((mac_addr == "") || (device_name == ""));
+        get_infor_result = !((mac_addr == "") || (device_name == ""));
+        get_infor_complete = true;
     }
 }
 
@@ -232,12 +234,16 @@ void setup() {
     xTaskCreate(get_infor_task, "get infor task", 2048, NULL, 10, &get_infor_task_handle);
     xTaskCreate(setup_gpio_task, "setup gpio task", 2048, NULL, 10, &setup_gpio_task_handle);
     xTaskCreate(setup_espnow_task, "setup espnow task", 2048, NULL, 10, &setup_espnow_task_handle);
-
-    // vTaskDelete(NULL);
+    //lấy thông tin
+    get_infor_result = false;
+    get_infor_complete = false;
+    xTaskNotifyGive(get_infor_task_handle);
+    while(!get_infor_complete);
+    
+    vTaskDelete(NULL);
 }
 
 
 void loop(){
-    Serial.println("hello");
-    vTaskDelay( 2000 / portTICK_PERIOD_MS);
+
 }
