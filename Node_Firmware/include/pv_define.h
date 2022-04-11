@@ -1,6 +1,5 @@
-#include <Arduino.h>
-
 //Define macro
+#define EEPROM_PIN          0
 #define DHT11_PIN           19
 #define D_INPUT_PIN_1       21
 // #define D_INPUT_PIN_2       22

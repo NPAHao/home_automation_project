@@ -7,7 +7,6 @@
 #include "pv_define.h"
 #include <ArduinoJson.h>
 
-
 //Declare Object
 Preferences pref;
 
@@ -15,14 +14,20 @@ Preferences pref;
 SemaphoreHandle_t   touch_1_smp = NULL;
 
 //Task handle
-TaskHandle_t    touch_1_handle;
-TaskHandle_t    d_input_1_handle;
+TaskHandle_t    touch_1_task_handle;
+TaskHandle_t    d_input_1_task_handle;
+TaskHandle_t    recv_cb_task_handle;
+TaskHandle_t    clear_eeprom_task_handle;
+TaskHandle_t    wait_for_infor_task_handle;
+TaskHandle_t    get_infor_task_handle;
+TaskHandle_t    setup_gpio_task_handle;
+TaskHandle_t    setup_espnow_task_handle;
 
 //Queue handle
 QueueHandle_t espnow_queue;
 
 //Struct
-struct incoming_msg_infor
+struct recv_msg
 {
     String mac;
     String data;
@@ -32,7 +37,10 @@ struct incoming_msg_infor
 //Variable
 String  device_name;
 String  mac_addr;
-
+uint8_t broadcast[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+esp_now_peer_info peer;
+bool    send_result;
+bool    get_infor_result;
 
 
                                 //Callback Function
@@ -41,15 +49,19 @@ void IRAM_ATTR touch_1_isr() {
 }
 
 void IRAM_ATTR d_input_1_isr() {
-    vTaskNotifyGiveFromISR(d_input_1_handle, pdFALSE);
+    vTaskNotifyGiveFromISR(d_input_1_task_handle, pdFALSE);
+}
+
+void IRAM_ATTR eeprom_pin_isr() {
+    vTaskNotifyGiveFromISR(clear_eeprom_task_handle, pdFALSE);
 }
 
 void now_send_isr(const uint8_t *mac_addr, esp_now_send_status_t status) {
-
+    send_result = (status == ESP_NOW_SEND_SUCCESS)?true:false;
 }
 
 void now_recv_isr(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
-    incoming_msg_infor msg;
+    recv_msg msg;
     msg.mac = String((char *)mac_addr);
     msg.data = String((char *)data);
     msg.data_len = data_len;
@@ -91,15 +103,13 @@ void touch_1_task(void *pvPara) {
                     break;               
                 }
             }
-            // serializeJsonPretty(doc, Serial);
             serializeJson(doc, json);
             esp_now_send((uint8_t *)mac_addr.c_str(), (uint8_t *)json.c_str(), json.length());
         }
     }
 }
 
-
-void d_input_1_task(void *pv) {
+void d_input_1_task(void *pvPara) {
     DynamicJsonDocument doc(250);
     String json;
     doc["from"] = "node";
@@ -113,24 +123,28 @@ void d_input_1_task(void *pv) {
     }
 }
 
-void recv_cb_task(void *pv) {
-    incoming_msg_infor msg;
+void recv_cb_task(void *pvPara) {
+    recv_msg msg;
     while (1)
     {
         xQueueReceive(espnow_queue, &msg, portMAX_DELAY);
         DynamicJsonDocument doc(250);
         deserializeJson(doc, msg.data);
         String from = doc["from"];
+        String to = doc["to"];
         String purpose = doc["purpose"];
-        if(from == "hub") {
+        if((from == "hub") && (to == "node")) {
             if(purpose == "add node") {
-
+                pref.begin("infor", false);
+                pref.putString("name", String((const char *)doc["name"]));
+                pref.putString("mac_addr", msg.mac);
+                pref.end();
             } else if(purpose == "add subnode") {
 
             } else if(purpose == "control") {
 
             }
-        } else if(from == "subnode") {
+        } else if((from == "subnode") && (to == "node")) {
             if(purpose == "send data") {
                 
             } else if(purpose == "add success") {
@@ -140,40 +154,90 @@ void recv_cb_task(void *pv) {
     }
 }
 
-void get_infor_task(void *pv) {
-    pref.begin("infor", true);
-    mac_addr = pref.getString("mac_addr", "");
-    device_name = pref.getString("name", "");
-
+void clear_eeprom_task(void *pvPara) {
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        pref.begin("infor", false);
+        pref.putString("mac_addr", "");
+        pref.putString("name", "");
+        pref.end();
+    }
 }
 
-
-void gpio_task(void *pvPara) {
-    pinMode(D_OUTPUT_PIN_1, OUTPUT);
-    pinMode(TOUCH_PIN_1, INPUT);
-    attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_1), touch_1_isr, RISING);
-    attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_1), d_input_1_isr, RISING);
-    xTaskCreate(touch_1_task, "touch 1", 2048, NULL, 10, NULL);
-    vTaskDelete(NULL);
+void wait_for_infor_task(void *pvPara) {
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
 }
 
+void get_infor_task(void *pvPara) {
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        pref.begin("infor", true);
+        mac_addr = pref.getString("mac_addr", "");
+        device_name = pref.getString("name", "");
+        pref.end();
+        ((mac_addr == "") || (device_name == ""));
+    }
+}
 
-void wireless_init(void *pv) {
-    WiFi.mode(WIFI_MODE_STA);
-    WiFi.disconnect();
-    esp_now_init();
-    esp_now_register_recv_cb(now_recv_isr);
-    esp_now_register_send_cb(now_send_isr);
-    vTaskDelete(NULL);
+void setup_gpio_task(void *pvPara) {
+    while(1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        pinMode(D_OUTPUT_PIN_1, OUTPUT);
+        pinMode(TOUCH_PIN_1, INPUT);
+        pinMode(EEPROM_PIN, INPUT_PULLUP);
+        attachInterrupt(digitalPinToInterrupt(TOUCH_PIN_1), touch_1_isr, RISING);
+        attachInterrupt(digitalPinToInterrupt(D_INPUT_PIN_1), d_input_1_isr, RISING);
+        attachInterrupt(digitalPinToInterrupt(EEPROM_PIN), eeprom_pin_isr, FALLING);
+    }
+}
+
+void setup_espnow_task(void *pvPara) {
+    while(1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        WiFi.mode(WIFI_MODE_STA);
+        WiFi.disconnect();
+        esp_now_init();
+        esp_now_register_recv_cb(now_recv_isr);
+        esp_now_register_send_cb(now_send_isr);
+        peer.channel = 1;
+        peer.encrypt = false;
+        memcpy(peer.peer_addr, broadcast, 6);
+        esp_now_add_peer(&peer);
+    }
+}
+
+void blink_led(int time) {
+    pinMode(LED_BUILTIN, OUTPUT);
+    for(int i = 0; i < time; i++) {
+        digitalWrite(LED_BUILTIN, HIGH);
+        vTaskDelay( 200 / portTICK_PERIOD_MS);
+        digitalWrite(LED_BUILTIN, LOW);
+        vTaskDelay( 200 / portTICK_PERIOD_MS);
+    }
 }
 
 
 void setup() {
     Serial.begin(115200);
-    espnow_queue = xQueueCreate(5, sizeof(incoming_msg_infor));
     touch_1_smp = xSemaphoreCreateBinary();
-    vTaskDelete(NULL);
+    espnow_queue = xQueueCreate(5, sizeof(recv_msg));
+    xTaskCreate(touch_1_task, "touch 1 task", 2048, NULL, 10, &touch_1_task_handle);
+    xTaskCreate(d_input_1_task, "d input 1 task", 2048, NULL, 10, &d_input_1_task_handle);
+    xTaskCreate(recv_cb_task, "espnow recv task", 4096, NULL, 10, &recv_cb_task_handle);
+    xTaskCreate(clear_eeprom_task, "clear eeprom task", 2048, NULL, 10, &clear_eeprom_task_handle);
+    xTaskCreate(wait_for_infor_task, "wait infor task", 2048, NULL, 10, &wait_for_infor_task_handle);
+    xTaskCreate(get_infor_task, "get infor task", 2048, NULL, 10, &get_infor_task_handle);
+    xTaskCreate(setup_gpio_task, "setup gpio task", 2048, NULL, 10, &setup_gpio_task_handle);
+    xTaskCreate(setup_espnow_task, "setup espnow task", 2048, NULL, 10, &setup_espnow_task_handle);
+
+    // vTaskDelete(NULL);
 }
 
 
-void loop(){}
+void loop(){
+    Serial.println("hello");
+    vTaskDelay( 2000 / portTICK_PERIOD_MS);
+}
