@@ -3,9 +3,6 @@
 #include <espnow.h>
 #include <ArduinoJson.h>
 
-String str;
-uint8_t mac[6];
-
 void setup() {
   Serial.begin(115200);
   WiFi.mode(WIFI_STA);
@@ -14,5 +11,4 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
 }

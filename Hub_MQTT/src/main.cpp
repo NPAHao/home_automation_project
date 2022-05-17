@@ -3,40 +3,148 @@
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 
-#define   DEBUG   1
+#define EEPROM_PIN          0
 
-typedef struct mqtt_packet
-{
-  String topic;
-  String message;
-} mqtt_packet;
+Preferences pref;
 
-//global variable
-#ifdef  DEBUG
-String      ssid        = "Phi Hung";
-String      psk         = "26022000";
-String      mqtt_server = "192.168.1.12";
-String      client_name = "gateway";
-String      node        = "room";
-#else
+AsyncWebServer server(80);
+
+TaskHandle_t    clear_eeprom_task_handle;
+
+const char* ap_ssid = "Gateway AP";
+
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <title>ESP Input Form</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    Gateway Config
+  </head>
+  <body>
+    <form action="/get">
+      SSID: <input type="text" name="ssid"><br>
+      Password: <input type="text" name="psk"><br>
+      MQTT server IP: <input type="text" name="mqtt_server"><br>
+      <input type="submit" value="Submit">
+    </form>
+  </body>
+</html>)rawliteral";
+
 String      ssid;
 String      psk;
 String      mqtt_server;
-#endif
-QueueHandle_t mqtt_packet_queue;
+String      client_name = "gateway";
+TaskHandle_t wifi_task_handle;
+TaskHandle_t mqtt_task_handle;
+TaskHandle_t uart_task_handle;
 WiFiClient  espClient;
-PubSubClient client(espClient);
+PubSubClient client;
 
-void mqtt_cb(char* topic, uint8_t* message, unsigned int length) {
-  mqtt_packet packet;
-  packet.topic = String(topic);
-  packet.message = String((char *)message).substring(0, length);
-  xQueueSendFromISR(mqtt_packet_queue, &packet, NULL);
+void blink_led(int time, int interval_ms) 
+{
+  pinMode(LED_BUILTIN, OUTPUT);
+  for(int i = 0; i < time; i++) 
+  {
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskDelay( interval_ms / portTICK_PERIOD_MS);
+    digitalWrite(LED_BUILTIN, LOW);
+    vTaskDelay( interval_ms / portTICK_PERIOD_MS);
+  }
+}
+
+void IRAM_ATTR eeprom_pin_isr() 
+{
+  vTaskNotifyGiveFromISR(clear_eeprom_task_handle, NULL);
+}
+void clear_eeprom_task(void *pvParameters) 
+{
+  pinMode(EEPROM_PIN, INPUT_PULLUP);
+  attachInterrupt(EEPROM_PIN, eeprom_pin_isr, FALLING);
+  while (1)
+  {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    pref.begin("infor", false);
+    pref.putString("ssid", "");
+    pref.putString("psk", "");
+    pref.putString("mqtt_server", "");
+    pref.end();
+    blink_led(5, 200);
+    ESP.restart();
+  }
+}
+
+void notFound(AsyncWebServerRequest *request) {
+  request->send(404, "text/plain", "Not found");
+}
+
+void onGet(AsyncWebServerRequest *request) {
+  String ssid_msg;
+  String psk_msg;
+  String mqtt_msg;
+  if (request->hasParam("ssid")) {
+    ssid_msg = request->getParam("ssid")->value();
+  }
+  if (request->hasParam("psk")) {
+    psk_msg = request->getParam("psk")->value();
+  }
+  if (request->hasParam("mqtt_server")) {
+    mqtt_msg = request->getParam("mqtt_server")->value();
+  }
+  if((ssid_msg == "") || (psk_msg == "") || (mqtt_msg == "")){
+    request->send(200, "text/html", "Some input field is empty<br><a href=\"/\">Return to Home Page</a>");
+  } else {
+    request->send(200, "text/html", "HTTP GET request sent to your ESP on input field<br>" 
+                                      + String("SSID with value: ") + ssid_msg + "<br>" 
+                                      + " Password with value: " + psk_msg + "<br>"
+                                      + " MQTT server IP with value: " + mqtt_msg + "<br>"
+                                      + "Gateway will restart in a few second");
+    pref.begin("infor", false);
+    pref.putString("ssid", ssid_msg);
+    pref.putString("psk", psk_msg);
+    pref.putString("mqtt_server", mqtt_msg);
+    pref.end();
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    ESP.restart();
+  }
+}
+
+void onIP(AsyncWebServerRequest *request) {
+  request->send_P(200, "text/html", index_html);
+}
+
+void get_config_webserver_task(void *pvParameters) {
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ap_ssid);
+  server.on("/", HTTP_GET, onIP);
+  server.on("/get", HTTP_GET, onGet);
+  server.onNotFound(notFound);
+  server.begin();
+  while (1)
+  {
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
+void get_infor() {
+  pref.begin("infor", true);
+  ssid = pref.getString("ssid", "");
+  psk = pref.getString("psk", "");
+  mqtt_server = pref.getString("mqtt_server", "");
+  pref.end();
+  if((ssid == "") || (psk == "") || (mqtt_server == "")) {
+    xTaskCreate(get_config_webserver_task, "webserver", 4096, NULL, 10, NULL);
+    while (1)
+    {
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+  }
 }
 
 void config_wifi(String pv_ssid, String pv_psk) {
-  WiFi.mode(WIFI_MODE_STA);
   WiFi.begin(pv_ssid.c_str(), pv_psk.c_str());
   while (WiFi.status() != WL_CONNECTED) {
     vTaskDelay(500 / portTICK_PERIOD_MS);
@@ -44,34 +152,34 @@ void config_wifi(String pv_ssid, String pv_psk) {
 }
 
 void wifi_loop_task(void *pvParameters) {
+  WiFi.mode(WIFI_MODE_STA);
+  config_wifi(ssid, psk);
+  xTaskNotifyGive(mqtt_task_handle);
   while(1) {
     if(!WiFi.isConnected()) {
-      WiFi.begin(ssid.c_str(), psk.c_str());
-      vTaskDelay(5000 / portTICK_PERIOD_MS);
+      config_wifi(ssid, psk);
     } else {
       vTaskDelay(5000 / portTICK_PERIOD_MS);
     }
   }
 }
 
-void config_mqtt(const char *pv_server, uint16_t port, void (*callback)(char*, uint8_t*, unsigned int)) {
-  client.setServer(pv_server, port);
-  client.setCallback(callback);
-}
-
 void mqtt_loop_task(void *pvParameters) {
-  String name = *(String *)pvParameters;
+  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+  client.setClient(espClient);
+  client.setServer(mqtt_server.c_str(), 1883);
+  client.setStream(Serial2);
+  do {
+    client.connect(client_name.c_str());
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  } while(!client.connected());
+  client.subscribe("mqtt out");
+  xTaskNotifyGive(uart_task_handle);
   while(1) {
     if(!client.connected()) {
-      if(client.connect(name.c_str())) {
-        client.subscribe((name + "/add node").c_str());
-        client.subscribe((name + "/delete node").c_str());
-        client.subscribe((node + "/add subnode").c_str());
-        client.subscribe((node + "/set config").c_str());
-        client.subscribe((node + "/get config").c_str());
-        client.subscribe((node + "/control output").c_str());
-        client.subscribe((node + "/trigger buzzer").c_str());
-        //subcribe here
+      if(client.connect(client_name.c_str())) {
+        client.subscribe("mqtt out");
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
       }
     } else {
       client.loop();
@@ -80,101 +188,31 @@ void mqtt_loop_task(void *pvParameters) {
   }
 }
 
-void split_topic(String pv_topic,String *pv_destination, String *pv_object) {
-  Serial.println(pv_topic);
-  *pv_destination = pv_topic.substring(0, pv_topic.indexOf('/'));
-  *pv_object = pv_topic.substring(pv_topic.indexOf('/') + 1);
-}
-
-String get_mac_add(String pv_node) {
-  String ret;
-  return ret;
-}
-
-void process_topic(String pv_destination, String pv_object, String pv_message) {
-  Serial.println(pv_destination);
-  Serial.println(pv_object);
-  Serial.println(pv_message);
-}
-
-void mqtt_packet_process(void *pvParameters) {
-  mqtt_packet packet;
-  String topic = "";
-  String message = "";
-  String destination = "";
-  String object = "";
-  String mac = "";
-  DynamicJsonDocument doc(256);
+void uart_loop_task(void *pvParameters) {
+  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+  Serial2.begin(115200);
+  Serial2.setTimeout(200);
+  DynamicJsonDocument doc(MQTT_MAX_PACKET_SIZE);
   while(1) {
-    xQueueReceive(mqtt_packet_queue, &packet, portMAX_DELAY);
-    deserializeJson(doc, packet.message);
-    destination = packet.topic.substring(0, packet.topic.indexOf('/'));
-    object = packet.topic.substring(packet.topic.indexOf('/') + 1);
-    doc["object"] = object;
-    doc["destination"] = destination;
-    // if(object == "add node") {
-    //   doc["object"] = "add node";
-    //   doc["node"] = String((const char *)msg_doc["node"]);
-    // } else if(object == "add subnode") {
-    //   doc["object"] = "add subnode";
-    //   doc["node"]
-    //   doc[""]
-    // } else if(object == "delete node") {
-
-    // } else if(object == "set input config") {
-
-    // } else if(object == "get input config") {
-
-    // } else if(object == "control output") {
-
-    // } else if(object == "trigger buzzer") {
-
-    // }
-    serializeJson(doc, Serial2);
+    if(Serial2.available()) {
+      if(!deserializeJson(doc, Serial2)) {
+        String buffer;
+        serializeJson(doc, buffer);
+        client.publish("mqtt in", buffer.c_str());
+      }
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 
 void setup() {
-  Serial.begin(115200);
-  Serial2.begin(115200);
-  mqtt_packet_queue = xQueueCreate(10, sizeof(mqtt_packet));
-  config_wifi(ssid, psk);
-  xTaskCreate(wifi_loop_task, "wifi loop", 1024, NULL, 10, NULL);
-  config_mqtt(mqtt_server.c_str(), (uint16_t)1883, mqtt_cb);
-  xTaskCreate(mqtt_loop_task, "mqtt loop", 2048, (void *)&client_name, 10, NULL);
-  xTaskCreate(mqtt_packet_process, "mqtt process", 2048, NULL, 10, NULL);
+  xTaskCreate(clear_eeprom_task, "clear infor", 2048, NULL, 10, &clear_eeprom_task_handle);
+  get_infor();
+  xTaskCreate(wifi_loop_task, "wifi loop", 2048, NULL, 10, &wifi_task_handle);
+  xTaskCreate(mqtt_loop_task, "mqtt loop", 2048, NULL, 10, &mqtt_task_handle);
+  xTaskCreate(uart_loop_task, "uart loop", 2048, NULL, 10, &uart_task_handle);
   vTaskDelay(1000 / portTICK_PERIOD_MS);
   vTaskDelete(NULL);
 }
 
 void loop(){}
-
-
-// callback function
-// task code
-// void mqtt_task(void *pv) {
-//   client.setServer(mqtt_server.c_str(), 1883);
-//   client.setCallback(mqtt_cb);
-//   while (1)
-//   {
-//     if(!client.connected()){
-//       if(client.connect("esp32")){
-//         client.subscribe("abc");
-//       }
-//     }
-//   }
-// }
-// void receive_uart_task() {
-//   Serial2.begin(115200);
-//   while (1)
-//   {
-//     if(Serial2.available() > 0) {
-//       DynamicJsonDocument doc(250);
-//       deserializeJson(doc, Serial2);
-//       String from = doc["from"];
-//       String purpose = doc["purpose"];
-//       String topic = doc["topic"];
-//       String payload = doc["payload"];
-//     }
-//   }
-// }
